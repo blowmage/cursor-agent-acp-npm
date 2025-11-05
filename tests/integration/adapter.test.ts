@@ -24,7 +24,10 @@ import { MockCursorCliBridge } from './mocks/cursor-bridge-mock';
 // Mock the CursorCliBridge module
 jest.mock('../../src/cursor/cli-bridge', () => ({
   CursorCliBridge: jest.fn().mockImplementation((config, logger) => {
-    return new (require('./mocks/cursor-bridge-mock').MockCursorCliBridge)(config, logger);
+    return new (require('./mocks/cursor-bridge-mock').MockCursorCliBridge)(
+      config,
+      logger
+    );
   }),
 }));
 
@@ -752,52 +755,50 @@ describe('CursorAgentAdapter Integration', () => {
     });
 
     it('should handle rapid prompt 3 specifically', async () => {
-        // Create a session first
-        const createRequest: AcpRequest = {
-          jsonrpc: '2.0',
-          method: 'session/new',
-          id: 'rapid-3-session',
-          params: {
-            metadata: { name: 'Rapid Prompt 3 Test Session' },
-          },
-        };
+      // Create a session first
+      const createRequest: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'rapid-3-session',
+        params: {
+          metadata: { name: 'Rapid Prompt 3 Test Session' },
+        },
+      };
 
-        const createResponse = await adapter.processRequest(createRequest);
-        const sessionId = createResponse.result.sessionId;
+      const createResponse = await adapter.processRequest(createRequest);
+      const sessionId = createResponse.result.sessionId;
 
-        // Send rapid prompt 3
-        const promptRequest: AcpRequest = {
-          jsonrpc: '2.0',
-          method: 'session/prompt',
-          id: 'rapid-3',
-          params: {
-            sessionId,
-            content: [
-              {
-                type: 'text',
-                text: 'Rapid prompt 3',
-              },
-            ],
-            stream: false,
-          },
-        };
+      // Send rapid prompt 3
+      const promptRequest: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/prompt',
+        id: 'rapid-3',
+        params: {
+          sessionId,
+          content: [
+            {
+              type: 'text',
+              text: 'Rapid prompt 3',
+            },
+          ],
+          stream: false,
+        },
+      };
 
-        const startTime = Date.now();
-        const response = await adapter.processRequest(promptRequest);
-        const duration = Date.now() - startTime;
+      const startTime = Date.now();
+      const response = await adapter.processRequest(promptRequest);
+      const duration = Date.now() - startTime;
 
-        console.log(`Rapid prompt 3 completed in ${duration}ms`);
+      console.log(`Rapid prompt 3 completed in ${duration}ms`);
 
-        // Request should complete successfully
-        expect(response.result).toBeDefined();
-        expect(response.result.stopReason).toBeDefined();
-        expect(response.id).toBe('rapid-3');
+      // Request should complete successfully
+      expect(response.result).toBeDefined();
+      expect(response.result.stopReason).toBeDefined();
+      expect(response.id).toBe('rapid-3');
 
-        // Should complete within reasonable time (increased from 5s to 15s)
-        expect(duration).toBeLessThan(15000); // 15 seconds max for single prompt
-      },
-      70000
-    ); // 70 second timeout to match integration test config
+      // Should complete within reasonable time (increased from 5s to 15s)
+      expect(duration).toBeLessThan(15000); // 15 seconds max for single prompt
+    }, 70000); // 70 second timeout to match integration test config
 
     it('should handle rapid prompt 4 specifically', async () => {
       // Create a session first

@@ -306,7 +306,8 @@ export class PromptHandler {
     try {
       // Load session to get working directory
       const session = await this.sessionManager.loadSession(sessionId);
-      const workingDir = (session.metadata['cwd'] as string | undefined) || process.cwd();
+      const workingDir =
+        (session.metadata['cwd'] as string | undefined) || process.cwd();
 
       this.logger.debug('Processing prompt with working directory', {
         sessionId,
@@ -406,7 +407,8 @@ export class PromptHandler {
     try {
       // Load session to get working directory
       const session = await this.sessionManager.loadSession(sessionId);
-      const workingDir = (session.metadata['cwd'] as string | undefined) || process.cwd();
+      const workingDir =
+        (session.metadata['cwd'] as string | undefined) || process.cwd();
 
       this.logger.debug('Processing streaming prompt with working directory', {
         sessionId,
@@ -439,7 +441,9 @@ export class PromptHandler {
       const streamResponse = await this.cursorBridge.sendStreamingPrompt({
         sessionId,
         content: processedContent,
-        ...(metadata !== undefined && { metadata: { ...metadata, cwd: workingDir } }),
+        ...(metadata !== undefined && {
+          metadata: { ...metadata, cwd: workingDir },
+        }),
         abortSignal: abortController.signal,
         onChunk: async (chunk: StreamChunk) => {
           if (chunk.type === 'content') {
