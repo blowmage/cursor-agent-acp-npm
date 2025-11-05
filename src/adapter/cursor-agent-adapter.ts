@@ -17,6 +17,7 @@ import {
   type Logger,
   type AcpRequest,
   type AcpResponse,
+  type InitializeParams,
   type SessionNewParams,
   type SessionLoadParams,
   type SessionListParams,
@@ -531,11 +532,12 @@ export class CursorAgentAdapter {
       throw new ProtocolError('Initialization handler not available');
     }
 
-    const params = request.params as any;
-    const result = await this.initializationHandler.initialize({
-      protocolVersion: params?.protocolVersion,
-      clientInfo: params?.clientInfo,
-    });
+    const params =
+      (request.params as InitializeParams) || ({} as InitializeParams);
+
+    // Pass the entire params object to InitializationHandler
+    // It will validate protocolVersion and handle all fields properly
+    const result = await this.initializationHandler.initialize(params);
 
     return {
       jsonrpc: '2.0',
@@ -574,7 +576,7 @@ export class CursorAgentAdapter {
     // Per ACP spec: session/new includes cwd (working directory) parameter
     // Store this in metadata so we can use it when executing commands
     const metadata = {
-      ...((params as any).metadata || {}),
+      ...(params.metadata || {}),
       cwd: cwd, // Capture working directory
       mcpServers: mcpServers, // Store MCP server configurations
     };
@@ -746,10 +748,11 @@ export class CursorAgentAdapter {
       throw new ProtocolError('sessionId is required');
     }
 
-    await this.sessionManager.updateSession(
-      params.sessionId,
-      params.metadata || {}
-    );
+    if (!params.metadata) {
+      throw new ProtocolError('metadata is required for session/update');
+    }
+
+    await this.sessionManager.updateSession(params.sessionId, params.metadata);
 
     return {
       jsonrpc: '2.0',
