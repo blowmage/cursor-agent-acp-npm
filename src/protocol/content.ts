@@ -848,7 +848,7 @@ export class ContentProcessor {
     const result: CodeContentBlock = {
       type: 'code',
       value: code,
-      language,
+      ...(language && { language }),
     };
 
     return result;
@@ -1124,14 +1124,21 @@ export class ContentProcessor {
         blocks[i + 1] &&
         blocks[i + 1]!.type === 'code'
       ) {
-        // Combine the file header with the following code block
-        const codeBlock = blocks[i + 1] as CodeContentBlock;
-        const result: CodeContentBlock = {
-          ...codeBlock,
-          filename: block.metadata['filename'] as string,
-        };
-        processedBlocks.push(result);
-        i++; // Skip the next block since we've combined it
+        // Extract and validate filename
+        const filename = block.metadata['filename'];
+        if (typeof filename === 'string') {
+          // Combine the file header with the following code block
+          const codeBlock = blocks[i + 1] as CodeContentBlock;
+          const result: CodeContentBlock = {
+            ...codeBlock,
+            filename,
+          };
+          processedBlocks.push(result);
+          i++; // Skip the next block since we've combined it
+        } else {
+          // Filename exists but isn't a string - push blocks separately
+          processedBlocks.push(block);
+        }
       } else if (block) {
         processedBlocks.push(block);
       }
