@@ -517,6 +517,10 @@ export interface SessionPromptParams {
   metadata?: Record<string, any>;
 }
 
+export interface SessionCancelParams {
+  sessionId: string; // Required: session to cancel
+}
+
 export interface MessagePart {
   content: string;
   content_type: string; // e.g., "text/plain", "application/json" (snake_case per ACP spec)

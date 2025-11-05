@@ -221,6 +221,9 @@ export class CursorAgentAdapter {
         case 'session/prompt':
           return await this.handleSessionPrompt(request);
 
+        case 'session/cancel':
+          return await this.handleSessionCancel(request);
+
         case 'tools/list':
           return await this.handleToolsList(request);
 
@@ -751,6 +754,36 @@ export class CursorAgentAdapter {
       throw new ProtocolError('Prompt handler not available');
     }
     return this.promptHandler.processPrompt(request);
+  }
+
+  private async handleSessionCancel(request: AcpRequest): Promise<AcpResponse> {
+    if (!this.promptHandler) {
+      throw new ProtocolError('Prompt handler not available');
+    }
+
+    const params = (request.params as any) || {};
+    const sessionId = params['sessionId'];
+
+    if (!sessionId || typeof sessionId !== 'string') {
+      throw new ProtocolError('sessionId is required and must be a string');
+    }
+
+    this.logger.info('Handling session cancellation request', { sessionId });
+
+    // Cancel all active requests for this session
+    // Per ACP spec: Agent MUST stop all operations
+    await this.promptHandler.cancelSession(sessionId);
+
+    // Per ACP spec: session/cancel is a notification
+    // Return success response
+    return {
+      jsonrpc: '2.0',
+      id: request.id,
+      result: {
+        sessionId,
+        cancelled: true,
+      },
+    };
   }
 
   private async handleToolsList(request: AcpRequest): Promise<AcpResponse> {

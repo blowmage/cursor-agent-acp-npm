@@ -45,6 +45,11 @@ export class PromptHandler {
   private readonly activeStreams = new Map<string, AbortController>();
   // Per-session request queue to serialize concurrent requests to the same session
   private readonly sessionQueues = new Map<string, Promise<any>>();
+  // Track all active abort controllers per session for cancellation
+  private readonly activeSessionRequests = new Map<
+    string,
+    Set<AbortController>
+  >();
   private readonly sendNotification: (
     notification: import('../types').AcpNotification
   ) => void;
@@ -404,6 +409,12 @@ export class PromptHandler {
     const abortController = new AbortController();
     this.activeStreams.set(requestId, abortController);
 
+    // Track this controller per session for cancellation
+    if (!this.activeSessionRequests.has(sessionId)) {
+      this.activeSessionRequests.set(sessionId, new Set());
+    }
+    this.activeSessionRequests.get(sessionId)!.add(abortController);
+
     try {
       // Load session to get working directory
       const session = await this.sessionManager.loadSession(sessionId);
@@ -540,6 +551,15 @@ export class PromptHandler {
     } finally {
       // Clean up stream tracking
       this.activeStreams.delete(requestId);
+
+      // Clean up session request tracking
+      const controllers = this.activeSessionRequests.get(sessionId);
+      if (controllers) {
+        controllers.delete(abortController);
+        if (controllers.size === 0) {
+          this.activeSessionRequests.delete(sessionId);
+        }
+      }
     }
   }
 
@@ -555,6 +575,40 @@ export class PromptHandler {
       return true;
     }
     return false;
+  }
+
+  /**
+   * Cancel all active requests for a session
+   * Per ACP spec: Agent MUST stop all operations for the session
+   */
+  async cancelSession(sessionId: string): Promise<void> {
+    this.logger.info('Cancelling all requests for session', { sessionId });
+
+    // Get all abort controllers for this session
+    const controllers = this.activeSessionRequests.get(sessionId);
+    if (controllers && controllers.size > 0) {
+      this.logger.debug('Aborting session requests', {
+        sessionId,
+        count: controllers.size,
+      });
+
+      // Abort all controllers
+      controllers.forEach((controller) => {
+        try {
+          controller.abort();
+        } catch (error) {
+          this.logger.warn('Error aborting controller', { error, sessionId });
+        }
+      });
+
+      // Clear the set
+      controllers.clear();
+      this.activeSessionRequests.delete(sessionId);
+
+      this.logger.info('Session requests cancelled', { sessionId });
+    } else {
+      this.logger.debug('No active requests found for session', { sessionId });
+    }
   }
 
   /**
