@@ -531,6 +531,9 @@ export class CursorAgentAdapter {
 
     // Validate cwd is an absolute path
     const cwd = params['cwd'];
+    if (typeof cwd !== 'string') {
+      throw new ProtocolError('cwd must be a string (per ACP spec)');
+    }
     if (!cwd.startsWith('/') && !cwd.match(/^[A-Za-z]:\\/)) {
       throw new ProtocolError('cwd must be an absolute path (per ACP spec)');
     }
