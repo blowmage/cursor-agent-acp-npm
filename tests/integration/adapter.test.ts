@@ -172,6 +172,210 @@ describe('CursorAgentAdapter Integration', () => {
           'Protocol version must be an integer'
         );
       });
+
+      it('should handle client capabilities in initialize request', async () => {
+        const request: AcpRequest = {
+          jsonrpc: '2.0',
+          method: 'initialize',
+          id: 'test-init-3',
+          params: {
+            protocolVersion: 1,
+            clientCapabilities: {
+              fs: {
+                readTextFile: true,
+                writeTextFile: true,
+              },
+              terminal: true,
+            },
+            clientInfo: {
+              name: 'zed-editor',
+              version: '0.143.0',
+            },
+          },
+        };
+
+        const response = await adapter.processRequest(request);
+
+        expect(response.jsonrpc).toBe('2.0');
+        expect(response.id).toBe('test-init-3');
+        expect(response.result).toBeDefined();
+        expect(response.result.protocolVersion).toBe(1);
+        expect(response.result.agentInfo).toBeDefined();
+        expect(response.result.agentCapabilities).toBeDefined();
+      });
+
+      it('should negotiate protocol version when client requests unsupported version', async () => {
+        const request: AcpRequest = {
+          jsonrpc: '2.0',
+          method: 'initialize',
+          id: 'test-init-4',
+          params: {
+            protocolVersion: 2, // Unsupported version
+            clientInfo: {
+              name: 'future-client',
+              version: '2.0.0',
+            },
+          },
+        };
+
+        const response = await adapter.processRequest(request);
+
+        expect(response.jsonrpc).toBe('2.0');
+        expect(response.id).toBe('test-init-4');
+        expect(response.result).toBeDefined();
+        // Should negotiate down to version 1
+        expect(response.result.protocolVersion).toBe(1);
+      });
+
+      it('should handle initialize without client info', async () => {
+        const request: AcpRequest = {
+          jsonrpc: '2.0',
+          method: 'initialize',
+          id: 'test-init-5',
+          params: {
+            protocolVersion: 1,
+            // No clientInfo provided
+          },
+        };
+
+        const response = await adapter.processRequest(request);
+
+        expect(response.jsonrpc).toBe('2.0');
+        expect(response.id).toBe('test-init-5');
+        expect(response.result).toBeDefined();
+        expect(response.result.protocolVersion).toBe(1);
+      });
+
+      it('should handle initialize without client capabilities', async () => {
+        const request: AcpRequest = {
+          jsonrpc: '2.0',
+          method: 'initialize',
+          id: 'test-init-6',
+          params: {
+            protocolVersion: 1,
+            clientInfo: {
+              name: 'minimal-client',
+              version: '1.0.0',
+            },
+            // No clientCapabilities provided
+          },
+        };
+
+        const response = await adapter.processRequest(request);
+
+        expect(response.jsonrpc).toBe('2.0');
+        expect(response.id).toBe('test-init-6');
+        expect(response.result).toBeDefined();
+        expect(response.result.protocolVersion).toBe(1);
+      });
+
+      it('should handle partial client capabilities', async () => {
+        const request: AcpRequest = {
+          jsonrpc: '2.0',
+          method: 'initialize',
+          id: 'test-init-7',
+          params: {
+            protocolVersion: 1,
+            clientCapabilities: {
+              fs: {
+                readTextFile: true,
+                // writeTextFile intentionally omitted
+              },
+              // terminal intentionally omitted
+            },
+          },
+        };
+
+        const response = await adapter.processRequest(request);
+
+        expect(response.jsonrpc).toBe('2.0');
+        expect(response.id).toBe('test-init-7');
+        expect(response.result).toBeDefined();
+        expect(response.result.agentCapabilities).toBeDefined();
+      });
+
+      it('should include MCP capabilities in initialize response', async () => {
+        const request: AcpRequest = {
+          jsonrpc: '2.0',
+          method: 'initialize',
+          id: 'test-init-8',
+          params: {
+            protocolVersion: 1,
+          },
+        };
+
+        const response = await adapter.processRequest(request);
+
+        expect(response.result).toBeDefined();
+        expect(response.result.agentCapabilities.mcp).toBeDefined();
+        expect(response.result.agentCapabilities.mcp.http).toBeDefined();
+        expect(response.result.agentCapabilities.mcp.sse).toBeDefined();
+      });
+
+      it('should include prompt capabilities in initialize response', async () => {
+        const request: AcpRequest = {
+          jsonrpc: '2.0',
+          method: 'initialize',
+          id: 'test-init-9',
+          params: {
+            protocolVersion: 1,
+          },
+        };
+
+        const response = await adapter.processRequest(request);
+
+        expect(response.result).toBeDefined();
+        expect(
+          response.result.agentCapabilities.promptCapabilities
+        ).toBeDefined();
+        expect(
+          response.result.agentCapabilities.promptCapabilities.image
+        ).toBeDefined();
+        expect(
+          response.result.agentCapabilities.promptCapabilities.audio
+        ).toBeDefined();
+        expect(
+          response.result.agentCapabilities.promptCapabilities.embeddedContext
+        ).toBeDefined();
+      });
+
+      it('should include loadSession capability in initialize response', async () => {
+        const request: AcpRequest = {
+          jsonrpc: '2.0',
+          method: 'initialize',
+          id: 'test-init-10',
+          params: {
+            protocolVersion: 1,
+          },
+        };
+
+        const response = await adapter.processRequest(request);
+
+        expect(response.result).toBeDefined();
+        expect(response.result.agentCapabilities.loadSession).toBe(true);
+      });
+
+      it('should reject missing protocol version', async () => {
+        const request: AcpRequest = {
+          jsonrpc: '2.0',
+          method: 'initialize',
+          id: 'test-init-11',
+          params: {
+            // protocolVersion intentionally missing
+            clientInfo: {
+              name: 'bad-client',
+              version: '1.0.0',
+            },
+          },
+        };
+
+        const response = await adapter.processRequest(request);
+
+        expect(response.error).toBeDefined();
+        expect(response.error?.message).toContain(
+          'Protocol version is required'
+        );
+      });
     });
 
     describe('session management', () => {

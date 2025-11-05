@@ -358,4 +358,853 @@ describe('InitializationHandler', () => {
       await expect(handler.initialize(params)).rejects.toThrow();
     });
   });
+
+  describe('client capabilities storage and validation', () => {
+    it('should store client capabilities when provided', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+        clientCapabilities: {
+          fs: {
+            readTextFile: true,
+            writeTextFile: true,
+          },
+          terminal: true,
+        },
+      };
+
+      // Act
+      await handler.initialize(params);
+
+      // Assert
+      const storedCapabilities = handler.getClientCapabilities();
+      expect(storedCapabilities).toEqual(params.clientCapabilities);
+    });
+
+    it('should return null when no client capabilities provided', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      // Act
+      await handler.initialize(params);
+
+      // Assert
+      expect(handler.getClientCapabilities()).toBeNull();
+    });
+
+    it('should correctly check canRequestFileRead when capability is true', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+        clientCapabilities: {
+          fs: {
+            readTextFile: true,
+          },
+        },
+      };
+
+      // Act
+      await handler.initialize(params);
+
+      // Assert
+      expect(handler.canRequestFileRead()).toBe(true);
+    });
+
+    it('should correctly check canRequestFileRead when capability is false', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+        clientCapabilities: {
+          fs: {
+            readTextFile: false,
+          },
+        },
+      };
+
+      // Act
+      await handler.initialize(params);
+
+      // Assert
+      expect(handler.canRequestFileRead()).toBe(false);
+    });
+
+    it('should return false for canRequestFileRead when fs is undefined', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+        clientCapabilities: {},
+      };
+
+      // Act
+      await handler.initialize(params);
+
+      // Assert
+      expect(handler.canRequestFileRead()).toBe(false);
+    });
+
+    it('should return false for canRequestFileRead when capabilities are null', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      // Act
+      await handler.initialize(params);
+
+      // Assert
+      expect(handler.canRequestFileRead()).toBe(false);
+    });
+
+    it('should correctly check canRequestFileWrite when capability is true', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+        clientCapabilities: {
+          fs: {
+            writeTextFile: true,
+          },
+        },
+      };
+
+      // Act
+      await handler.initialize(params);
+
+      // Assert
+      expect(handler.canRequestFileWrite()).toBe(true);
+    });
+
+    it('should correctly check canRequestFileWrite when capability is false', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+        clientCapabilities: {
+          fs: {
+            writeTextFile: false,
+          },
+        },
+      };
+
+      // Act
+      await handler.initialize(params);
+
+      // Assert
+      expect(handler.canRequestFileWrite()).toBe(false);
+    });
+
+    it('should return false for canRequestFileWrite when fs is undefined', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+        clientCapabilities: {},
+      };
+
+      // Act
+      await handler.initialize(params);
+
+      // Assert
+      expect(handler.canRequestFileWrite()).toBe(false);
+    });
+
+    it('should correctly check canRequestTerminal when capability is true', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+        clientCapabilities: {
+          terminal: true,
+        },
+      };
+
+      // Act
+      await handler.initialize(params);
+
+      // Assert
+      expect(handler.canRequestTerminal()).toBe(true);
+    });
+
+    it('should correctly check canRequestTerminal when capability is false', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+        clientCapabilities: {
+          terminal: false,
+        },
+      };
+
+      // Act
+      await handler.initialize(params);
+
+      // Assert
+      expect(handler.canRequestTerminal()).toBe(false);
+    });
+
+    it('should return false for canRequestTerminal when capabilities are null', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      // Act
+      await handler.initialize(params);
+
+      // Assert
+      expect(handler.canRequestTerminal()).toBe(false);
+    });
+
+    it('should handle partial fs capabilities', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+        clientCapabilities: {
+          fs: {
+            readTextFile: true,
+            // writeTextFile intentionally omitted
+          },
+        },
+      };
+
+      // Act
+      await handler.initialize(params);
+
+      // Assert
+      expect(handler.canRequestFileRead()).toBe(true);
+      expect(handler.canRequestFileWrite()).toBe(false);
+    });
+
+    it('should log stored client capabilities', async () => {
+      // Arrange
+      const logSpy = jest.spyOn(mockLogger, 'info');
+      const params: InitializeParams = {
+        protocolVersion: 1,
+        clientCapabilities: {
+          fs: {
+            readTextFile: true,
+            writeTextFile: false,
+          },
+          terminal: true,
+        },
+      };
+
+      // Mock successful connectivity test
+      jest.spyOn(handler as any, 'testCursorConnectivity').mockResolvedValue({
+        success: true,
+        authenticated: true,
+      });
+
+      // Act
+      await handler.initialize(params);
+
+      // Assert
+      expect(logSpy).toHaveBeenCalledWith(
+        'Client capabilities stored',
+        expect.objectContaining({
+          supportsFileRead: true,
+          supportsFileWrite: false,
+          supportsTerminal: true,
+        })
+      );
+    });
+  });
+
+  describe('protocol version negotiation edge cases', () => {
+    it('should return version 1 when client requests unsupported version 2', async () => {
+      // Arrange
+      const logSpy = jest.spyOn(mockLogger, 'warn');
+      const params: InitializeParams = {
+        protocolVersion: 2,
+      };
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert
+      expect(result.protocolVersion).toBe(1);
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'Client requested version 2 which is not supported'
+        )
+      );
+    });
+
+    it('should return version 1 when client requests unsupported version 99', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 99,
+      };
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert
+      expect(result.protocolVersion).toBe(1);
+    });
+
+    it('should negotiate down to version 1 when client requests version 0', async () => {
+      // Arrange
+      const logSpy = jest.spyOn(mockLogger, 'warn');
+      const params: InitializeParams = {
+        protocolVersion: 0,
+      };
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert - should negotiate down to version 1 (per ACP spec: be lenient)
+      expect(result.protocolVersion).toBe(1);
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'Client requested version 0 which is not supported'
+        )
+      );
+    });
+
+    it('should negotiate down to version 1 for negative protocol versions', async () => {
+      // Arrange
+      const logSpy = jest.spyOn(mockLogger, 'warn');
+      const params: InitializeParams = {
+        protocolVersion: -1,
+      };
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert - should negotiate down to version 1 (per ACP spec: be lenient)
+      expect(result.protocolVersion).toBe(1);
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'Client requested version -1 which is not supported'
+        )
+      );
+    });
+
+    it('should reject fractional protocol versions', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1.5,
+      };
+
+      // Act & Assert
+      await expect(handler.initialize(params)).rejects.toThrow(
+        'Protocol version must be an integer'
+      );
+    });
+
+    it('should reject very large protocol versions gracefully', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: Number.MAX_SAFE_INTEGER,
+      };
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert - should negotiate down to version 1
+      expect(result.protocolVersion).toBe(1);
+    });
+
+    it('should reject NaN as protocol version', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: NaN,
+      };
+
+      // Act & Assert
+      await expect(handler.initialize(params)).rejects.toThrow(
+        'Protocol version must be an integer'
+      );
+    });
+
+    it('should reject Infinity as protocol version', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: Infinity,
+      };
+
+      // Act & Assert
+      await expect(handler.initialize(params)).rejects.toThrow(
+        'Protocol version must be an integer'
+      );
+    });
+  });
+
+  describe('cursor connectivity impact on capabilities', () => {
+    it('should set image capability to true when cursor is available and authenticated', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      jest.spyOn(handler as any, 'testCursorConnectivity').mockResolvedValue({
+        success: true,
+        authenticated: true,
+        version: '1.0.0',
+      });
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert
+      expect(result.agentCapabilities.promptCapabilities?.image).toBe(true);
+    });
+
+    it('should set image capability to false when cursor is unavailable', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      jest.spyOn(handler as any, 'testCursorConnectivity').mockResolvedValue({
+        success: false,
+        error: 'cursor not found',
+      });
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert
+      expect(result.agentCapabilities.promptCapabilities?.image).toBe(false);
+    });
+
+    it('should set image capability to false when cursor is unauthenticated', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      jest.spyOn(handler as any, 'testCursorConnectivity').mockResolvedValue({
+        success: true,
+        authenticated: false,
+        error: 'Authentication required',
+      });
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert
+      expect(result.agentCapabilities.promptCapabilities?.image).toBe(false);
+    });
+
+    it('should set embeddedContext capability based on cursor availability', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      jest.spyOn(handler as any, 'testCursorConnectivity').mockResolvedValue({
+        success: true,
+        authenticated: true,
+      });
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert
+      expect(result.agentCapabilities.promptCapabilities?.embeddedContext).toBe(
+        true
+      );
+    });
+
+    it('should set embeddedContext to false when cursor is unavailable', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      jest.spyOn(handler as any, 'testCursorConnectivity').mockResolvedValue({
+        success: false,
+      });
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert
+      expect(result.agentCapabilities.promptCapabilities?.embeddedContext).toBe(
+        false
+      );
+    });
+
+    it('should set audio capability to false regardless of cursor availability', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      jest.spyOn(handler as any, 'testCursorConnectivity').mockResolvedValue({
+        success: true,
+        authenticated: true,
+      });
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert
+      expect(result.agentCapabilities.promptCapabilities?.audio).toBe(false);
+    });
+
+    it('should set _meta.streaming based on cursor availability', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      jest.spyOn(handler as any, 'testCursorConnectivity').mockResolvedValue({
+        success: true,
+        authenticated: true,
+      });
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert
+      expect(result.agentCapabilities._meta?.streaming).toBe(true);
+    });
+
+    it('should set _meta.streaming to false when cursor is unavailable', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      jest.spyOn(handler as any, 'testCursorConnectivity').mockResolvedValue({
+        success: false,
+      });
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert
+      expect(result.agentCapabilities._meta?.streaming).toBe(false);
+    });
+
+    it('should set _meta.toolCalling based on cursor availability', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      jest.spyOn(handler as any, 'testCursorConnectivity').mockResolvedValue({
+        success: true,
+        authenticated: true,
+      });
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert
+      expect(result.agentCapabilities._meta?.toolCalling).toBe(true);
+    });
+
+    it('should set _meta.toolCalling to false when cursor is unavailable', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      jest.spyOn(handler as any, 'testCursorConnectivity').mockResolvedValue({
+        success: false,
+      });
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert
+      expect(result.agentCapabilities._meta?.toolCalling).toBe(false);
+    });
+
+    it('should include text, code, image in contentTypes when cursor is available', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      jest.spyOn(handler as any, 'testCursorConnectivity').mockResolvedValue({
+        success: true,
+        authenticated: true,
+      });
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert
+      expect(result.agentCapabilities._meta?.contentTypes).toEqual([
+        'text',
+        'code',
+        'image',
+      ]);
+    });
+
+    it('should include only text in contentTypes when cursor is unavailable', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      jest.spyOn(handler as any, 'testCursorConnectivity').mockResolvedValue({
+        success: false,
+      });
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert
+      expect(result.agentCapabilities._meta?.contentTypes).toEqual(['text']);
+    });
+
+    it('should set _meta.cursorAvailable to true when cursor is available', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      jest.spyOn(handler as any, 'testCursorConnectivity').mockResolvedValue({
+        success: true,
+        authenticated: true,
+        version: '1.2.3',
+      });
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert
+      expect(result.agentCapabilities._meta?.cursorAvailable).toBe(true);
+    });
+
+    it('should set _meta.cursorAvailable to false when cursor is unavailable', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      jest.spyOn(handler as any, 'testCursorConnectivity').mockResolvedValue({
+        success: false,
+      });
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert
+      expect(result.agentCapabilities._meta?.cursorAvailable).toBe(false);
+    });
+
+    it('should include cursor version in _meta when available', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      jest.spyOn(handler as any, 'testCursorConnectivity').mockResolvedValue({
+        success: true,
+        authenticated: true,
+        version: '1.2.3',
+      });
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert
+      expect(result.agentCapabilities._meta?.cursorVersion).toBe('1.2.3');
+    });
+  });
+
+  describe('client info variations', () => {
+    it('should handle clientInfo with title field', async () => {
+      // Arrange
+      const logSpy = jest.spyOn(mockLogger, 'info');
+      const params: InitializeParams = {
+        protocolVersion: 1,
+        clientInfo: {
+          name: 'test-client',
+          title: 'Test Client Application',
+          version: '2.0.0',
+        },
+      };
+
+      // Mock successful connectivity test
+      jest.spyOn(handler as any, 'testCursorConnectivity').mockResolvedValue({
+        success: true,
+        authenticated: true,
+      });
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert
+      expect(result).toBeDefined();
+      expect(logSpy).toHaveBeenCalledWith(
+        'Client information',
+        expect.objectContaining({
+          name: 'test-client',
+          title: 'Test Client Application',
+          version: '2.0.0',
+        })
+      );
+    });
+
+    it('should handle clientInfo with empty strings', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+        clientInfo: {
+          name: '',
+          version: '',
+        },
+      };
+
+      // Mock successful connectivity test
+      jest.spyOn(handler as any, 'testCursorConnectivity').mockResolvedValue({
+        success: true,
+        authenticated: true,
+      });
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert
+      expect(result).toBeDefined();
+    });
+
+    it('should handle clientInfo with special characters', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+        clientInfo: {
+          name: 'test-client-™',
+          version: '1.0.0-beta+build.123',
+        },
+      };
+
+      // Mock successful connectivity test
+      jest.spyOn(handler as any, 'testCursorConnectivity').mockResolvedValue({
+        success: true,
+        authenticated: true,
+      });
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert
+      expect(result).toBeDefined();
+    });
+
+    it('should handle clientInfo with very long strings', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+        clientInfo: {
+          name: 'a'.repeat(1000),
+          version: 'v'.repeat(500),
+        },
+      };
+
+      // Mock successful connectivity test
+      jest.spyOn(handler as any, 'testCursorConnectivity').mockResolvedValue({
+        success: true,
+        authenticated: true,
+      });
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert
+      expect(result).toBeDefined();
+    });
+  });
+
+  describe('logging', () => {
+    it('should log warning when cursor is unavailable', async () => {
+      // Arrange
+      const logSpy = jest.spyOn(mockLogger, 'warn');
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      jest.spyOn(handler as any, 'testCursorConnectivity').mockResolvedValue({
+        success: false,
+        error: 'cursor-agent not found',
+      });
+
+      // Act
+      await handler.initialize(params);
+
+      // Assert
+      expect(logSpy).toHaveBeenCalledWith(
+        'Cursor CLI not available during initialization. Features may be limited.',
+        expect.objectContaining({
+          error: 'cursor-agent not found',
+        })
+      );
+    });
+
+    it('should log warning when cursor authentication fails', async () => {
+      // Arrange
+      const logSpy = jest.spyOn(mockLogger, 'warn');
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      jest.spyOn(handler as any, 'testCursorConnectivity').mockResolvedValue({
+        success: true,
+        authenticated: false,
+        error: 'Authentication required',
+      });
+
+      // Act
+      await handler.initialize(params);
+
+      // Assert
+      expect(logSpy).toHaveBeenCalledWith(
+        'Cursor authentication not verified. Features may require authentication.',
+        expect.objectContaining({
+          error: 'Authentication required',
+        })
+      );
+    });
+
+    it('should log info when cursor connectivity is verified', async () => {
+      // Arrange
+      const logSpy = jest.spyOn(mockLogger, 'info');
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      jest.spyOn(handler as any, 'testCursorConnectivity').mockResolvedValue({
+        success: true,
+        authenticated: true,
+        version: '1.2.3',
+      });
+
+      // Act
+      await handler.initialize(params);
+
+      // Assert
+      expect(logSpy).toHaveBeenCalledWith(
+        'Cursor CLI connectivity verified',
+        expect.objectContaining({
+          version: '1.2.3',
+          authenticated: true,
+        })
+      );
+    });
+
+    it('should log error when initialization fails', async () => {
+      // Arrange
+      const logSpy = jest.spyOn(mockLogger, 'error');
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      // Force an error during initialization
+      jest
+        .spyOn(handler as any, 'testCursorConnectivity')
+        .mockRejectedValue(new Error('Unexpected error'));
+
+      // Act & Assert
+      await expect(handler.initialize(params)).rejects.toThrow();
+      expect(logSpy).toHaveBeenCalledWith(
+        'Initialization failed',
+        expect.any(Error)
+      );
+    });
+  });
 });
