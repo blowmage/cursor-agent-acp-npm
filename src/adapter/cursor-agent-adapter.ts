@@ -431,9 +431,7 @@ export class CursorAgentAdapter {
     const request: AcpRequest = JSON.parse(message);
 
     // Per JSON-RPC 2.0 spec: Notifications (requests without id) do not receive responses
-    const isNotification = request.id === null || request.id === undefined;
-
-    if (isNotification) {
+    if (this.isNotification(request)) {
       this.logger.debug('Processing notification (no response)', {
         method: request.method,
       });
@@ -487,10 +485,7 @@ export class CursorAgentAdapter {
           const request: AcpRequest = JSON.parse(body);
 
           // Per JSON-RPC 2.0 spec: Notifications (requests without id) do not receive responses
-          const isNotification =
-            request.id === null || request.id === undefined;
-
-          if (isNotification) {
+          if (this.isNotification(request)) {
             await this.processRequest(request);
             res.writeHead(204); // No Content
             res.end();
@@ -893,6 +888,14 @@ export class CursorAgentAdapter {
       id: request.id,
       result,
     };
+  }
+
+  /**
+   * Check if an ACP request is a notification (no response expected)
+   * Per JSON-RPC 2.0 spec: Notifications are requests without an id field
+   */
+  private isNotification(request: AcpRequest): boolean {
+    return request.id === null || request.id === undefined;
   }
 
   private async cleanup(): Promise<void> {
