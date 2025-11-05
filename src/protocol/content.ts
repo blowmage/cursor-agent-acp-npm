@@ -848,7 +848,7 @@ export class ContentProcessor {
     const result: CodeContentBlock = {
       type: 'code',
       value: code,
-      ...(language && { language }),
+      language,
     };
 
     return result;
