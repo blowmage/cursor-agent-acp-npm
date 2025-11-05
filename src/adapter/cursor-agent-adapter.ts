@@ -635,6 +635,19 @@ export class CursorAgentAdapter {
       if (!message.content || !Array.isArray(message.content)) continue;
       // Stream each content block as a separate notification
       for (const contentBlock of message.content) {
+        // Convert content block to ACP format based on type
+        let contentData: Record<string, any>;
+        if (contentBlock.type === 'text') {
+          contentData = { text: contentBlock.value };
+        } else if (contentBlock.type === 'code') {
+          contentData = {
+            code: contentBlock.value,
+            language: (contentBlock as any).language,
+          };
+        } else {
+          contentData = {};
+        }
+
         const notification = {
           jsonrpc: '2.0' as const,
           method: 'session/update',
@@ -644,15 +657,7 @@ export class CursorAgentAdapter {
               sessionUpdate: sessionUpdateType,
               content: {
                 type: contentBlock.type,
-                // Convert content block to ACP format
-                ...(contentBlock.type === 'text'
-                  ? { text: contentBlock.value }
-                  : contentBlock.type === 'code'
-                    ? {
-                        code: contentBlock.value,
-                        language: (contentBlock as any).language,
-                      }
-                    : {}),
+                ...contentData,
               },
             },
           },
