@@ -3,6 +3,9 @@
  *
  * Tests the complete flow of tool call reporting from tool execution
  * through to client notifications.
+ *
+ * Note: CursorCliBridge is mocked to avoid slow real cursor-agent calls
+ * while still testing all other component integrations.
  */
 
 import { CursorAgentAdapter } from '../../src/adapter/cursor-agent-adapter';
@@ -10,7 +13,26 @@ import type {
   AdapterConfig,
   AcpRequest,
   AcpNotification,
+  Logger,
 } from '../../src/types';
+
+// Mock the CursorCliBridge module
+jest.mock('../../src/cursor/cli-bridge', () => ({
+  CursorCliBridge: jest.fn().mockImplementation((config, logger) => {
+    return new (require('./mocks/cursor-bridge-mock').MockCursorCliBridge)(
+      config,
+      logger
+    );
+  }),
+}));
+
+// Mock logger for tests
+const mockLogger: Logger = {
+  error: jest.fn(),
+  warn: jest.fn(),
+  info: jest.fn(),
+  debug: jest.fn(),
+};
 
 describe('Tool Calls Integration', () => {
   let adapter: CursorAgentAdapter;
@@ -41,25 +63,35 @@ describe('Tool Calls Integration', () => {
   };
 
   beforeEach(async () => {
+    jest.clearAllMocks();
     sentNotifications = [];
 
-    // Override sendNotification to capture notifications
-    adapter = new CursorAgentAdapter(mockConfig);
+    // Create adapter - jest.mock ensures CursorCliBridge is mocked automatically
+    adapter = new CursorAgentAdapter(mockConfig, { logger: mockLogger });
 
-    // Monkey-patch sendNotification
-    const originalSend = (adapter as any).sendNotification;
-    (adapter as any).sendNotification = function (
-      notification: AcpNotification
-    ) {
-      sentNotifications.push(notification);
-      originalSend.call(this, notification);
-    };
+    // Spy on sendNotification to capture notifications before initialization
+    jest
+      .spyOn(adapter as any, 'sendNotification')
+      .mockImplementation((notification: AcpNotification) => {
+        sentNotifications.push(notification);
+        // Still write to stdout like the real implementation
+        const notificationStr = JSON.stringify(notification);
+        process.stdout.write(notificationStr + '\n');
+      });
 
     await adapter.initialize();
   });
 
   afterEach(async () => {
-    await adapter.shutdown();
+    if (adapter) {
+      try {
+        await adapter.shutdown();
+      } catch (error) {
+        // Ignore shutdown errors in tests
+      }
+    }
+    // Give time for all async cleanup to complete
+    await new Promise((resolve) => setTimeout(resolve, 100));
   });
 
   describe('Tool Call Reporting', () => {
@@ -86,9 +118,9 @@ describe('Tool Calls Integration', () => {
         id: 2,
         method: 'tools/call',
         params: {
-          sessionId,
           name: 'read_file',
           parameters: {
+            sessionId,
             path: '/tmp/test.txt',
           },
         },
@@ -134,9 +166,9 @@ describe('Tool Calls Integration', () => {
         id: 2,
         method: 'tools/call',
         params: {
-          sessionId,
           name: 'list_directory',
           parameters: {
+            sessionId,
             path: '/tmp',
           },
         },
@@ -183,12 +215,11 @@ describe('Tool Calls Integration', () => {
           id: Math.random(),
           method: 'tools/call',
           params: {
-            sessionId,
             name: test.name,
             parameters:
               test.name === 'read_file'
-                ? { path: '/tmp/test.txt' }
-                : { path: '/tmp' },
+                ? { sessionId, path: '/tmp/test.txt' }
+                : { sessionId, path: '/tmp' },
           },
         };
 
@@ -225,9 +256,9 @@ describe('Tool Calls Integration', () => {
         id: 2,
         method: 'tools/call',
         params: {
-          sessionId,
           name: 'list_directory',
           parameters: {
+            sessionId,
             path: '/tmp',
           },
         },
@@ -268,9 +299,9 @@ describe('Tool Calls Integration', () => {
         id: 2,
         method: 'tools/call',
         params: {
-          sessionId,
           name: 'read_file',
           parameters: {
+            sessionId,
             path: '/tmp/nonexistent-file-12345.txt',
           },
         },
@@ -311,9 +342,9 @@ describe('Tool Calls Integration', () => {
         id: 2,
         method: 'tools/call',
         params: {
-          sessionId,
           name: 'list_directory',
           parameters: {
+            sessionId,
             path: '/tmp',
           },
         },

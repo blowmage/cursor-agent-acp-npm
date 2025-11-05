@@ -237,6 +237,11 @@ export interface ToolCall {
   parameters: Record<string, any>;
 }
 
+export interface ToolCallParams {
+  name: string;
+  parameters?: Record<string, any>;
+}
+
 export interface ToolResult {
   success: boolean;
   result?: any | undefined;

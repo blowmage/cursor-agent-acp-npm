@@ -175,15 +175,26 @@ export class ToolRegistry {
       // Report tool call start
       if (shouldReportToolCalls) {
         const toolKind = this.getToolKind(toolCall.name);
+        const locations = this.extractLocations(toolCall.parameters);
+        const reportOptions: {
+          title: string;
+          kind: import('../types').ToolKind;
+          status: 'in_progress';
+          rawInput: Record<string, any>;
+          locations?: import('../types').ToolCallLocation[];
+        } = {
+          title: this.getToolTitle(toolCall.name, toolCall.parameters),
+          kind: toolKind,
+          status: 'in_progress',
+          rawInput: toolCall.parameters,
+        };
+        if (locations.length > 0) {
+          reportOptions.locations = locations;
+        }
         toolCallId = await this.toolCallManager!.reportToolCall(
           sessionId!,
           toolCall.name,
-          {
-            title: this.getToolTitle(toolCall.name, toolCall.parameters),
-            kind: toolKind,
-            status: 'in_progress',
-            rawInput: toolCall.parameters,
-          }
+          reportOptions
         );
       }
 
@@ -236,6 +247,33 @@ export class ToolRegistry {
         await this.toolCallManager!.failToolCall(sessionId!, toolCallId, {
           error: errorMessage,
         });
+      } else if (shouldReportToolCalls && !toolCallId) {
+        // If we didn't get a toolCallId yet, report the failure
+        const toolKind = this.getToolKind(toolCall.name);
+        const locations = this.extractLocations(toolCall.parameters);
+        const reportOptions: {
+          title: string;
+          kind: import('../types').ToolKind;
+          status: 'failed';
+          rawInput: Record<string, any>;
+          locations?: import('../types').ToolCallLocation[];
+        } = {
+          title: this.getToolTitle(toolCall.name, toolCall.parameters),
+          kind: toolKind,
+          status: 'failed',
+          rawInput: toolCall.parameters,
+        };
+        if (locations.length > 0) {
+          reportOptions.locations = locations;
+        }
+        toolCallId = await this.toolCallManager!.reportToolCall(
+          sessionId!,
+          toolCall.name,
+          reportOptions
+        );
+        await this.toolCallManager!.failToolCall(sessionId!, toolCallId, {
+          error: errorMessage,
+        });
       }
 
       return {
@@ -249,6 +287,39 @@ export class ToolRegistry {
         },
       };
     }
+  }
+
+  /**
+   * Extract file locations from tool parameters
+   * Per ACP spec: Enable clients to track which files the agent is accessing
+   */
+  private extractLocations(
+    parameters: Record<string, any>
+  ): import('../types').ToolCallLocation[] {
+    const locations: import('../types').ToolCallLocation[] = [];
+
+    // Extract file path from different parameter names
+    if (parameters['path']) {
+      locations.push({ path: parameters['path'] });
+    } else if (parameters['sourcePath']) {
+      locations.push({ path: parameters['sourcePath'] });
+    }
+
+    // For move/copy operations, also include destination
+    if (parameters['destinationPath'] || parameters['destination']) {
+      locations.push({
+        path: parameters['destinationPath'] || parameters['destination'],
+      });
+    }
+
+    // For tools that work with multiple files
+    if (parameters['files'] && Array.isArray(parameters['files'])) {
+      parameters['files'].forEach((file: string) => {
+        locations.push({ path: file });
+      });
+    }
+
+    return locations;
   }
 
   /**

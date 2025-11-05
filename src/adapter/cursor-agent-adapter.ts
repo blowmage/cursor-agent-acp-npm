@@ -24,6 +24,7 @@ import {
   type SessionUpdateParams,
   type SessionDeleteParams,
   type SessionCancelParams,
+  type ToolCallParams,
 } from '../types';
 import { createLogger } from '../utils/logger';
 import { validateConfig } from '../utils/config';
@@ -902,15 +903,14 @@ export class CursorAgentAdapter {
       throw new ProtocolError('Tool registry not available');
     }
 
-    const params =
-      (request.params as { name: string; parameters?: Record<string, any> }) ||
-      ({} as { name: string; parameters?: Record<string, any> });
+    const params = (request.params as ToolCallParams) || ({} as ToolCallParams);
     if (!params.name) {
       throw new ProtocolError('tool name is required');
     }
 
     // Extract sessionId if provided (for tool call reporting)
-    const sessionId = params['sessionId'] || params['session_id'];
+    const sessionId =
+      params.parameters?.['sessionId'] || params.parameters?.['session_id'];
 
     const toolCall = {
       id: request.id.toString(),
