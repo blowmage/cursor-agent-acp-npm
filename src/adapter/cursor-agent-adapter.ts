@@ -744,7 +744,10 @@ export class CursorAgentAdapter {
     }
 
     // metadata is optional; default to empty object for backward compatibility
-    await this.sessionManager.updateSession(params.sessionId, params.metadata || {});
+    await this.sessionManager.updateSession(
+      params.sessionId,
+      params.metadata || {}
+    );
     return {
       jsonrpc: '2.0',
       id: request.id,

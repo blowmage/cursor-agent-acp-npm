@@ -641,7 +641,11 @@ describe('Prompt Turn Integration Tests', () => {
       // We verify this by checking the order in which the mock processed the prompts.
       // The mock should record the order of prompt IDs it processed.
       const mockBridge = (adapter as any).bridge as any;
-      expect(mockBridge.processedPromptIds).toEqual(['queue-1', 'queue-2', 'queue-3']);
+      expect(mockBridge.processedPromptIds).toEqual([
+        'queue-1',
+        'queue-2',
+        'queue-3',
+      ]);
     }, 30000);
 
     it('should process prompts to different sessions in parallel', async () => {
@@ -1065,9 +1069,7 @@ describe('Prompt Turn Integration Tests', () => {
       });
 
       // Session should not be stuck in processing state
-      await (adapter as any).sessionManager.loadSession(
-        sessionId
-      );
+      await (adapter as any).sessionManager.loadSession(sessionId);
 
       // If session is properly cleaned up, we can send another prompt
       const mockBridge2 = (adapter as any).cursorBridge;
