@@ -829,13 +829,7 @@ export class CursorAgentAdapter {
       };
     }
 
-    // For proper notifications (no id), return a dummy response
-    // The processRequest handler should not send this to the client
-    return {
-      jsonrpc: '2.0',
-      id: null,
-      result: null,
-    };
+    // For proper notifications (no id), do not return a response (notification)
   }
 
   private async handleToolsList(request: AcpRequest): Promise<AcpResponse> {
