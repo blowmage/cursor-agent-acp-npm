@@ -594,11 +594,7 @@ export class PromptHandler {
 
       // Abort all controllers
       controllers.forEach((controller) => {
-        try {
-          controller.abort();
-        } catch (error) {
-          this.logger.warn('Error aborting controller', { error, sessionId });
-        }
+        controller.abort();
       });
 
       // Clear the set
