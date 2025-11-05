@@ -623,6 +623,8 @@ export class CursorAgentAdapter {
         continue;
       }
 
+      // Guard: skip if content is missing or not an array
+      if (!message.content || !Array.isArray(message.content)) continue;
       // Stream each content block as a separate notification
       for (const contentBlock of message.content) {
         const notification = {
