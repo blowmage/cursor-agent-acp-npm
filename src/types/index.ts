@@ -152,7 +152,7 @@ export interface TextContentBlock {
 // ACP spec recommends using text with annotations, but we keep this for convenience
 export interface CodeContentBlock {
   type: 'code';
-  value: string; // Internal only
+  value: string; // The code content as a string.
   language?: string;
   filename?: string;
   annotations?: Annotations;
