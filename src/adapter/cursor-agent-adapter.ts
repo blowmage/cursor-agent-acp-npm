@@ -518,19 +518,45 @@ export class CursorAgentAdapter {
 
     const params = (request.params as any) || {};
 
+    // Per ACP spec: cwd is required
+    if (!params['cwd']) {
+      throw new ProtocolError('cwd (working directory) is required');
+    }
+
+    // Per ACP spec: mcpServers is required (can be empty array)
+    const mcpServers = params['mcpServers'] || [];
+
+    // Validate cwd is an absolute path
+    const cwd = params['cwd'];
+    if (!cwd.startsWith('/') && !cwd.match(/^[A-Za-z]:\\/)) {
+      throw new ProtocolError('cwd must be an absolute path (per ACP spec)');
+    }
+
     // Per ACP spec: session/new includes cwd (working directory) parameter
     // Store this in metadata so we can use it when executing commands
     const metadata = {
       ...(params['metadata'] || {}),
-      cwd: params['cwd'] || process.cwd(), // Capture working directory
+      cwd: cwd, // Capture working directory
+      mcpServers: mcpServers, // Store MCP server configurations
     };
 
     const sessionData = await this.sessionManager.createSession(metadata);
 
-    this.logger.info('Session created with working directory', {
+    this.logger.info('Session created with working directory and MCP servers', {
       sessionId: sessionData.id,
-      cwd: metadata.cwd,
+      cwd: cwd,
+      mcpServerCount: mcpServers.length,
+      mcpServerNames: mcpServers.map((s: any) => s.name || 'unnamed'),
     });
+
+    // TODO: Connect to MCP servers specified in mcpServers array
+    // For now, we accept the configuration but don't connect
+    if (mcpServers.length > 0) {
+      this.logger.warn(
+        'MCP server connections are not yet implemented. Server configurations stored but not connected.',
+        { mcpServerCount: mcpServers.length }
+      );
+    }
 
     // Per ACP spec: NewSessionResponse must contain sessionId (required),
     // and optionally modes and models. No other fields.
@@ -555,18 +581,78 @@ export class CursorAgentAdapter {
       throw new ProtocolError('sessionId is required');
     }
 
-    const sessionData = await this.sessionManager.loadSession(
-      params['sessionId']
-    );
+    // Per ACP spec: cwd and mcpServers are required parameters
+    if (!params['cwd']) {
+      throw new ProtocolError('cwd is required');
+    }
 
+    if (!params['mcpServers']) {
+      throw new ProtocolError('mcpServers is required');
+    }
+
+    const sessionId = params['sessionId'];
+    const cwd = params['cwd'];
+    const mcpServers = params['mcpServers'];
+
+    this.logger.info('Loading session with parameters', {
+      sessionId,
+      cwd,
+      mcpServerCount: mcpServers.length,
+    });
+
+    // Load the session data
+    const sessionData = await this.sessionManager.loadSession(sessionId);
+
+    // Per ACP spec: Agent MUST replay entire conversation via session/update notifications
+    // Stream each message in the conversation history
+    for (const message of sessionData.conversation) {
+      // Determine the session update type based on message role
+      let sessionUpdateType: string;
+      if (message.role === 'user') {
+        sessionUpdateType = 'user_message_chunk';
+      } else if (message.role === 'assistant' || message.role === 'system') {
+        sessionUpdateType = 'agent_message_chunk';
+      } else {
+        // Skip unknown message types
+        continue;
+      }
+
+      // Stream each content block as a separate notification
+      for (const contentBlock of message.content) {
+        const notification = {
+          jsonrpc: '2.0' as const,
+          method: 'session/update',
+          params: {
+            sessionId: sessionId,
+            update: {
+              sessionUpdate: sessionUpdateType,
+              content: {
+                type: contentBlock.type,
+                // Convert content block to ACP format
+                ...(contentBlock.type === 'text'
+                  ? { text: contentBlock.value }
+                  : contentBlock.type === 'code'
+                    ? {
+                        code: contentBlock.value,
+                        language: (contentBlock as any).language,
+                      }
+                    : {}),
+              },
+            },
+          },
+        };
+
+        // Send the notification to the client
+        this.sendNotification(notification);
+      }
+    }
+
+    // Per ACP spec: After streaming all conversation entries,
+    // respond to the original session/load request with null
     return {
       jsonrpc: '2.0',
       id: request.id,
-      result: {
-        sessionId: sessionData.id,
-        metadata: sessionData.metadata,
-        conversation: sessionData.conversation,
-      },
+      result: null,
     };
   }
 

@@ -151,7 +151,7 @@ describe('CursorAgentAdapter Integration', () => {
         expect(
           response.result.agentCapabilities.promptCapabilities
         ).toBeDefined();
-        expect(response.result.agentCapabilities.mcp).toBeDefined();
+        expect(response.result.agentCapabilities.mcpCapabilities).toBeDefined();
         expect(response.result.authMethods).toEqual([]);
       });
 
@@ -307,9 +307,13 @@ describe('CursorAgentAdapter Integration', () => {
         const response = await adapter.processRequest(request);
 
         expect(response.result).toBeDefined();
-        expect(response.result.agentCapabilities.mcp).toBeDefined();
-        expect(response.result.agentCapabilities.mcp.http).toBeDefined();
-        expect(response.result.agentCapabilities.mcp.sse).toBeDefined();
+        expect(response.result.agentCapabilities.mcpCapabilities).toBeDefined();
+        expect(
+          response.result.agentCapabilities.mcpCapabilities.http
+        ).toBeDefined();
+        expect(
+          response.result.agentCapabilities.mcpCapabilities.sse
+        ).toBeDefined();
       });
 
       it('should include prompt capabilities in initialize response', async () => {
@@ -386,6 +390,8 @@ describe('CursorAgentAdapter Integration', () => {
           method: 'session/new',
           id: 'test-session-1',
           params: {
+            cwd: '/tmp/test-project', // Required per ACP spec
+            mcpServers: [], // Required per ACP spec
             metadata: {
               name: 'Test Session',
               tags: ['test'],
@@ -406,13 +412,14 @@ describe('CursorAgentAdapter Integration', () => {
           id: 'test-session-2',
           params: {
             sessionId,
+            cwd: '/tmp/test-project', // Required per ACP spec
+            mcpServers: [], // Required per ACP spec
           },
         };
 
         const loadResponse = await adapter.processRequest(loadRequest);
-        expect(loadResponse.result).toBeDefined();
-        expect(loadResponse.result.sessionId).toBe(sessionId);
-        expect(loadResponse.result.metadata.name).toBe('Test Session');
+        // Per ACP spec: session/load returns null after streaming conversation
+        expect(loadResponse.result).toBeNull();
 
         // Delete session
         const deleteRequest: AcpRequest = {
@@ -429,6 +436,81 @@ describe('CursorAgentAdapter Integration', () => {
         expect(deleteResponse.result.deleted).toBe(true);
       });
 
+      it('should require cwd parameter for session/new', async () => {
+        const request: AcpRequest = {
+          jsonrpc: '2.0',
+          method: 'session/new',
+          id: 'test-session-cwd-1',
+          params: {
+            // cwd missing
+            mcpServers: [],
+          },
+        };
+
+        const response = await adapter.processRequest(request);
+
+        expect(response.error).toBeDefined();
+        expect(response.error?.message).toContain(
+          'cwd (working directory) is required'
+        );
+      });
+
+      it('should require absolute path for cwd', async () => {
+        const request: AcpRequest = {
+          jsonrpc: '2.0',
+          method: 'session/new',
+          id: 'test-session-cwd-2',
+          params: {
+            cwd: './relative/path',
+            mcpServers: [],
+          },
+        };
+
+        const response = await adapter.processRequest(request);
+
+        expect(response.error).toBeDefined();
+        expect(response.error?.message).toContain(
+          'cwd must be an absolute path'
+        );
+      });
+
+      it('should accept Windows-style absolute paths for cwd', async () => {
+        const request: AcpRequest = {
+          jsonrpc: '2.0',
+          method: 'session/new',
+          id: 'test-session-cwd-3',
+          params: {
+            cwd: 'C:\\Users\\Test\\Project',
+            mcpServers: [],
+          },
+        };
+
+        const response = await adapter.processRequest(request);
+
+        expect(response.result).toBeDefined();
+        expect(response.result.sessionId).toBeDefined();
+      });
+
+      it('should handle session/new with multiple MCP servers', async () => {
+        const request: AcpRequest = {
+          jsonrpc: '2.0',
+          method: 'session/new',
+          id: 'test-session-mcp-1',
+          params: {
+            cwd: '/tmp/test-project',
+            mcpServers: [
+              { name: 'server-1', url: 'http://localhost:3000' },
+              { name: 'server-2', url: 'http://localhost:3001' },
+            ],
+          },
+        };
+
+        const response = await adapter.processRequest(request);
+
+        expect(response.result).toBeDefined();
+        expect(response.result.sessionId).toBeDefined();
+      });
+
       it('should list sessions with pagination', async () => {
         // Create multiple sessions
         for (let i = 0; i < 3; i++) {
@@ -437,6 +519,8 @@ describe('CursorAgentAdapter Integration', () => {
             method: 'session/new',
             id: `create-${i}`,
             params: {
+              cwd: '/tmp/test-project', // Required per ACP spec
+              mcpServers: [], // Required per ACP spec
               metadata: { name: `Session ${i}` },
             },
           };
@@ -472,6 +556,8 @@ describe('CursorAgentAdapter Integration', () => {
           method: 'session/new',
           id: 'setup-session',
           params: {
+            cwd: '/tmp/test-project', // Required per ACP spec
+            mcpServers: [], // Required per ACP spec
             metadata: { name: 'Prompt Test Session' },
           },
         };
@@ -719,6 +805,8 @@ describe('CursorAgentAdapter Integration', () => {
         id: 'test-error-3',
         params: {
           sessionId: 'non-existent-session-id',
+          cwd: '/tmp/test-project', // Required per ACP spec
+          mcpServers: [], // Required per ACP spec
         },
       };
 
@@ -740,6 +828,8 @@ describe('CursorAgentAdapter Integration', () => {
           method: 'session/new',
           id: `concurrent-${i}`,
           params: {
+            cwd: '/tmp/test-project', // Required per ACP spec
+            mcpServers: [], // Required per ACP spec
             metadata: { name: `Concurrent Session ${i}` },
           },
         };
@@ -768,6 +858,8 @@ describe('CursorAgentAdapter Integration', () => {
         method: 'session/new',
         id: 'perf-session',
         params: {
+          cwd: '/tmp/test-project', // Required per ACP spec
+          mcpServers: [], // Required per ACP spec
           metadata: { name: 'Performance Test Session' },
         },
       };
@@ -830,6 +922,8 @@ describe('CursorAgentAdapter Integration', () => {
         method: 'session/new',
         id: 'rapid-0-session',
         params: {
+          cwd: '/tmp/test-project', // Required per ACP spec
+          mcpServers: [], // Required per ACP spec
           metadata: { name: 'Rapid Prompt 0 Test Session' },
         },
       };
@@ -876,6 +970,8 @@ describe('CursorAgentAdapter Integration', () => {
         method: 'session/new',
         id: 'rapid-1-session',
         params: {
+          cwd: '/tmp/test-project', // Required per ACP spec
+          mcpServers: [], // Required per ACP spec
           metadata: { name: 'Rapid Prompt 1 Test Session' },
         },
       };
@@ -922,6 +1018,8 @@ describe('CursorAgentAdapter Integration', () => {
         method: 'session/new',
         id: 'rapid-2-session',
         params: {
+          cwd: '/tmp/test-project', // Required per ACP spec
+          mcpServers: [], // Required per ACP spec
           metadata: { name: 'Rapid Prompt 2 Test Session' },
         },
       };
@@ -968,6 +1066,8 @@ describe('CursorAgentAdapter Integration', () => {
         method: 'session/new',
         id: 'rapid-3-session',
         params: {
+          cwd: '/tmp/test-project', // Required per ACP spec
+          mcpServers: [], // Required per ACP spec
           metadata: { name: 'Rapid Prompt 3 Test Session' },
         },
       };
@@ -1014,6 +1114,8 @@ describe('CursorAgentAdapter Integration', () => {
         method: 'session/new',
         id: 'rapid-4-session',
         params: {
+          cwd: '/tmp/test-project', // Required per ACP spec
+          mcpServers: [], // Required per ACP spec
           metadata: { name: 'Rapid Prompt 4 Test Session' },
         },
       };
@@ -1060,6 +1162,8 @@ describe('CursorAgentAdapter Integration', () => {
         method: 'session/new',
         id: 'rapid-6-session',
         params: {
+          cwd: '/tmp/test-project', // Required per ACP spec
+          mcpServers: [], // Required per ACP spec
           metadata: { name: 'Rapid Prompt 6 Test Session' },
         },
       };
@@ -1106,6 +1210,8 @@ describe('CursorAgentAdapter Integration', () => {
         method: 'session/new',
         id: 'rapid-9-session',
         params: {
+          cwd: '/tmp/test-project', // Required per ACP spec
+          mcpServers: [], // Required per ACP spec
           metadata: { name: 'Rapid Prompt 9 Test Session' },
         },
       };
@@ -1166,6 +1272,8 @@ describe('CursorAgentAdapter Integration', () => {
           method: 'session/new',
           id: `metrics-${i}`,
           params: {
+            cwd: '/tmp/test-project', // Required per ACP spec
+            mcpServers: [], // Required per ACP spec
             metadata: { name: `Metrics Session ${i}` },
           },
         };
@@ -1198,6 +1306,8 @@ describe('CursorAgentAdapter Integration', () => {
             method: 'session/new',
             id: `limit-${i}`,
             params: {
+              cwd: '/tmp/test-project', // Required per ACP spec
+              mcpServers: [], // Required per ACP spec
               metadata: { name: `Limit Session ${i}` },
             },
           };
@@ -1211,6 +1321,8 @@ describe('CursorAgentAdapter Integration', () => {
           method: 'session/new',
           id: 'over-limit',
           params: {
+            cwd: '/tmp/test-project', // Required per ACP spec
+            mcpServers: [], // Required per ACP spec
             metadata: { name: 'Over Limit Session' },
           },
         };

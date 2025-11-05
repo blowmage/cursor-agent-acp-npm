@@ -56,7 +56,7 @@ describe('InitializationHandler', () => {
       expect(result.agentCapabilities).toBeDefined();
       expect(result.agentCapabilities.loadSession).toBe(true);
       expect(result.agentCapabilities.promptCapabilities).toBeDefined();
-      expect(result.agentCapabilities.mcp).toBeDefined();
+      expect(result.agentCapabilities.mcpCapabilities).toBeDefined(); // Per ACP spec: use "mcpCapabilities"
       expect(result.authMethods).toEqual([]);
     });
 
