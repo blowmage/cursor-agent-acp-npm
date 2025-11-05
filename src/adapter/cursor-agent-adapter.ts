@@ -600,6 +600,14 @@ export class CursorAgentAdapter {
     const cwd = params['cwd'];
     const mcpServers = params['mcpServers'];
 
+    // Validate cwd is an absolute path
+    if (typeof cwd !== 'string') {
+      throw new ProtocolError('cwd must be a string (per ACP spec)');
+    }
+    if (!cwd.startsWith('/') && !cwd.match(/^[A-Za-z]:\\/)) {
+      throw new ProtocolError('cwd must be an absolute path (per ACP spec)');
+    }
+
     this.logger.info('Loading session with parameters', {
       sessionId,
       cwd,
