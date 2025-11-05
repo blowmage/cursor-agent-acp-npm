@@ -28,6 +28,16 @@ export interface ProcessedContent {
   metadata: Record<string, any>;
 }
 
+interface ContentMetadata {
+  blocks: Array<{
+    index: number;
+    type: string;
+    size: number;
+    [key: string]: any;
+  }>;
+  totalSize: number;
+}
+
 interface StreamingState {
   inCodeBlock: boolean;
   codeLanguage?: string;
@@ -137,7 +147,7 @@ export class ContentProcessor {
     this.logger.debug('Processing content blocks', { count: blocks.length });
 
     const processedBlocks: string[] = [];
-    const metadata: Record<string, any> = {
+    const metadata: ContentMetadata = {
       blocks: [],
       totalSize: 0,
     };
@@ -154,14 +164,14 @@ export class ContentProcessor {
       const processedBlock = await this.processContentBlock(normalizedBlock, i);
       processedBlocks.push(processedBlock.value);
 
-      (metadata as any).blocks.push({
+      metadata.blocks.push({
         index: i,
         type: block.type,
         size: processedBlock.value.length,
         ...processedBlock.metadata,
       });
 
-      (metadata as any).totalSize += processedBlock.value.length;
+      metadata.totalSize += processedBlock.value.length;
     }
 
     const result = {
@@ -171,7 +181,7 @@ export class ContentProcessor {
 
     this.logger.debug('Content processing completed', {
       totalBlocks: blocks.length,
-      totalSize: (metadata as any).totalSize,
+      totalSize: metadata.totalSize,
     });
 
     return result;
@@ -198,8 +208,9 @@ export class ContentProcessor {
       case 'resource_link':
         return this.processResourceLinkBlock(block, index);
       default:
+        // TypeScript knows this should be unreachable, but at runtime invalid blocks might arrive
         throw new ProtocolError(
-          `Unknown content block type: ${(block as any).type}`
+          `Unknown content block type: ${(block as { type: string }).type}`
         );
     }
   }
@@ -833,13 +844,11 @@ export class ContentProcessor {
     const language = firstLine.substring(3).trim() || undefined;
     const code = lines.slice(1, -1).join('\n'); // Remove first and last lines (```)
 
-    const result: any = {
+    const result: CodeContentBlock = {
       type: 'code',
       value: code,
+      ...(language && { language }),
     };
-    if (language) {
-      result.language = language;
-    }
 
     return result;
   }
@@ -1116,10 +1125,10 @@ export class ContentProcessor {
       ) {
         // Combine the file header with the following code block
         const codeBlock = blocks[i + 1] as CodeContentBlock;
-        const result: any = {
+        const result: CodeContentBlock = {
           ...codeBlock,
+          filename: block.metadata['filename'] as string,
         };
-        result.filename = block.metadata['filename'];
         processedBlocks.push(result);
         i++; // Skip the next block since we've combined it
       } else if (block) {
