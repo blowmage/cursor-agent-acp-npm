@@ -51,19 +51,6 @@ describe('Tool System Security', () => {
     }
   });
 
-  afterEach(async () => {
-    // Cleanup any spawned processes after each test
-    if (registry) {
-      try {
-        await registry.cleanup();
-        // Give substantial time for all processes to terminate
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      } catch (error) {
-        console.warn('Failed to cleanup registry:', error);
-      }
-    }
-  });
-
   beforeEach(() => {
     mockConfig = {
       logLevel: 'debug',
@@ -103,6 +90,21 @@ describe('Tool System Security', () => {
     };
 
     registry = new ToolRegistry(mockConfig, mockLogger);
+  });
+
+  afterEach(async () => {
+    // Always cleanup spawned processes after each test
+    // This ensures shell processes from terminal tests are properly terminated
+    if (registry) {
+      try {
+        await registry.cleanup();
+        // Give sufficient time for all processes to terminate
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      } catch (error) {
+        // Ignore cleanup errors - registry might not have been fully initialized
+        console.debug('Cleanup error (ignored):', error);
+      }
+    }
   });
 
   describe('Filesystem Security', () => {

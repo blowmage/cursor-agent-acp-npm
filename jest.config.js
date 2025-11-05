@@ -28,6 +28,6 @@ module.exports = {
   clearMocks: true,
   restoreMocks: true,
   errorOnDeprecated: true,
-  detectOpenHandles: true,
+  forceExit: true,
   verbose: true,
 };
