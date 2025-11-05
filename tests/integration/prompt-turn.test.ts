@@ -13,7 +13,6 @@ import type {
   Logger,
   AcpNotification,
 } from '../../src/types';
-import { MockCursorCliBridge } from './mocks/cursor-bridge-mock';
 
 // Mock the CursorCliBridge module so adapter uses mock instead of real CLI
 jest.mock('../../src/cursor/cli-bridge', () => ({
