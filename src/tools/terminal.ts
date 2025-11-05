@@ -57,19 +57,13 @@ export class TerminalToolProvider implements ToolProvider {
 
     // Cleanup process on exit
     process.on('exit', () => {
-      this.cleanup().catch((err) =>
-        this.logger.error('Cleanup error on exit', err)
-      );
+      this.cleanup().catch((err) => this.logger.error('Cleanup error on exit', err));
     });
     process.on('SIGINT', () => {
-      this.cleanup().catch((err) =>
-        this.logger.error('Cleanup error on SIGINT', err)
-      );
+      this.cleanup().catch((err) => this.logger.error('Cleanup error on SIGINT', err));
     });
     process.on('SIGTERM', () => {
-      this.cleanup().catch((err) =>
-        this.logger.error('Cleanup error on SIGTERM', err)
-      );
+      this.cleanup().catch((err) => this.logger.error('Cleanup error on SIGTERM', err));
     });
   }
 

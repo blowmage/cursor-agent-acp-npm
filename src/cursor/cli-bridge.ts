@@ -508,8 +508,7 @@ export class CursorCliBridge {
 
     try {
       // Extract working directory from metadata
-      const workingDir =
-        (metadata?.['cwd'] as string | undefined) || process.cwd();
+      const workingDir = (metadata?.['cwd'] as string | undefined) || process.cwd();
 
       this.logger.info('Sending prompt to Cursor CLI', {
         sessionId,
@@ -536,13 +535,8 @@ export class CursorCliBridge {
           args.unshift('--resume', sessionId);
         }
 
-        this.logger.debug('Executing cursor-agent command', {
-          args,
-          cwd: workingDir,
-        });
-        this.logger.info(
-          `Running: cursor-agent ${args.join(' ')} (cwd: ${workingDir})`
-        );
+        this.logger.debug('Executing cursor-agent command', { args, cwd: workingDir });
+        this.logger.info(`Running: cursor-agent ${args.join(' ')} (cwd: ${workingDir})`);
 
         const response = await this.executeCommand(args, { cwd: workingDir });
 
@@ -638,8 +632,7 @@ export class CursorCliBridge {
 
     try {
       // Extract working directory from metadata
-      const workingDir =
-        (metadata?.['cwd'] as string | undefined) || process.cwd();
+      const workingDir = (metadata?.['cwd'] as string | undefined) || process.cwd();
 
       this.logger.info('Sending streaming prompt to Cursor CLI', {
         sessionId,
