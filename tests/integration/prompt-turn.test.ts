@@ -1065,7 +1065,7 @@ describe('Prompt Turn Integration Tests', () => {
       });
 
       // Session should not be stuck in processing state
-      const sessionData = await (adapter as any).sessionManager.loadSession(
+      await (adapter as any).sessionManager.loadSession(
         sessionId
       );
 
