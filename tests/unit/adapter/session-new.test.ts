@@ -1,0 +1,804 @@
+/**
+ * Tests for session/new method - ACP spec compliance
+ *
+ * Tests parameter validation, path handling, and MCP server configuration
+ * for the session/new method per ACP specification.
+ */
+
+import { CursorAgentAdapter } from '../../../src/adapter/cursor-agent-adapter';
+import type {
+  AdapterConfig,
+  AcpRequest,
+  AcpResponse,
+  Logger,
+} from '../../../src/types';
+
+// Mock the CursorCliBridge module
+jest.mock('../../../src/cursor/cli-bridge', () => ({
+  CursorCliBridge: jest.fn().mockImplementation((config, logger) => {
+    return {
+      getVersion: jest.fn().mockResolvedValue('1.0.0'),
+      checkAuthentication: jest
+        .fn()
+        .mockResolvedValue({ authenticated: true, user: 'test' }),
+      close: jest.fn().mockResolvedValue(undefined),
+    };
+  }),
+}));
+
+// Mock logger for tests
+const mockLogger: Logger = {
+  error: jest.fn(),
+  warn: jest.fn(),
+  info: jest.fn(),
+  debug: jest.fn(),
+};
+
+// Test configuration
+const testConfig: AdapterConfig = {
+  logLevel: 'debug',
+  sessionDir: '/tmp/cursor-test-sessions',
+  maxSessions: 10,
+  sessionTimeout: 60000,
+  tools: {
+    filesystem: {
+      enabled: true,
+      allowedPaths: ['/tmp', './'],
+    },
+    terminal: {
+      enabled: true,
+      maxProcesses: 3,
+    },
+  },
+  cursor: {
+    timeout: 30000,
+    retries: 1,
+  },
+};
+
+describe('session/new - Parameter Validation', () => {
+  let adapter: CursorAgentAdapter;
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    adapter = new CursorAgentAdapter(testConfig, { logger: mockLogger });
+    await adapter.initialize();
+  });
+
+  afterEach(async () => {
+    if (adapter) {
+      try {
+        await adapter.shutdown();
+      } catch (error) {
+        // Ignore shutdown errors in tests
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  });
+
+  describe('cwd parameter validation', () => {
+    it('should reject session/new without cwd parameter', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-cwd-1',
+        params: {
+          mcpServers: [],
+          metadata: { name: 'Test Session' },
+        },
+      };
+
+      const response = await adapter.processRequest(request);
+
+      expect(response.error).toBeDefined();
+      expect(response.error?.message).toContain(
+        'cwd (working directory) is required'
+      );
+    });
+
+    it('should reject session/new with null cwd', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-cwd-2',
+        params: {
+          cwd: null,
+          mcpServers: [],
+        },
+      };
+
+      const response = await adapter.processRequest(request);
+
+      expect(response.error).toBeDefined();
+      expect(response.error?.message).toContain(
+        'cwd (working directory) is required'
+      );
+    });
+
+    it('should reject session/new with empty string cwd', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-cwd-3',
+        params: {
+          cwd: '',
+          mcpServers: [],
+        },
+      };
+
+      const response = await adapter.processRequest(request);
+
+      expect(response.error).toBeDefined();
+      expect(response.error?.message).toContain(
+        'cwd (working directory) is required'
+      );
+    });
+
+    it('should reject session/new with relative path cwd', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-cwd-4',
+        params: {
+          cwd: './relative/path',
+          mcpServers: [],
+        },
+      };
+
+      const response = await adapter.processRequest(request);
+
+      expect(response.error).toBeDefined();
+      expect(response.error?.message).toContain('cwd must be an absolute path');
+    });
+
+    it('should reject session/new with relative path starting with ../', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-cwd-5',
+        params: {
+          cwd: '../parent/path',
+          mcpServers: [],
+        },
+      };
+
+      const response = await adapter.processRequest(request);
+
+      expect(response.error).toBeDefined();
+      expect(response.error?.message).toContain('cwd must be an absolute path');
+    });
+
+    it('should accept session/new with Unix absolute path', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-cwd-6',
+        params: {
+          cwd: '/absolute/unix/path',
+          mcpServers: [],
+        },
+      };
+
+      const response = await adapter.processRequest(request);
+
+      expect(response.result).toBeDefined();
+      expect(response.result.sessionId).toBeDefined();
+      expect(response.error).toBeUndefined();
+    });
+
+    it('should accept session/new with Windows absolute path', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-cwd-7',
+        params: {
+          cwd: 'C:\\absolute\\windows\\path',
+          mcpServers: [],
+        },
+      };
+
+      const response = await adapter.processRequest(request);
+
+      expect(response.result).toBeDefined();
+      expect(response.result.sessionId).toBeDefined();
+      expect(response.error).toBeUndefined();
+    });
+
+    it('should accept Windows paths with forward slashes', async () => {
+      // Windows accepts both forward slashes (D:/) and backslashes (D:\)
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-cwd-8',
+        params: {
+          cwd: 'D:/absolute/windows/path',
+          mcpServers: [],
+        },
+      };
+
+      const response = await adapter.processRequest(request);
+
+      // Should accept both forward and backward slashes
+      expect(response.result).toBeDefined();
+      expect(response.result.sessionId).toBeDefined();
+      expect(response.error).toBeUndefined();
+    });
+
+    it('should handle cwd with special characters', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-cwd-9',
+        params: {
+          cwd: '/path/with spaces/and-special_chars!@#',
+          mcpServers: [],
+        },
+      };
+
+      const response = await adapter.processRequest(request);
+
+      expect(response.result).toBeDefined();
+      expect(response.result.sessionId).toBeDefined();
+    });
+
+    it('should handle very long cwd paths', async () => {
+      const longPath = '/very/long/' + 'path/'.repeat(50) + 'directory';
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-cwd-10',
+        params: {
+          cwd: longPath,
+          mcpServers: [],
+        },
+      };
+
+      const response = await adapter.processRequest(request);
+
+      expect(response.result).toBeDefined();
+      expect(response.result.sessionId).toBeDefined();
+    });
+
+    it('should log session creation with cwd', async () => {
+      const logSpy = jest.spyOn(mockLogger, 'info');
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-cwd-11',
+        params: {
+          cwd: '/test/project',
+          mcpServers: [],
+        },
+      };
+
+      await adapter.processRequest(request);
+
+      expect(logSpy).toHaveBeenCalledWith(
+        'Session created with working directory and MCP servers',
+        expect.objectContaining({
+          sessionId: expect.any(String),
+          cwd: '/test/project',
+        })
+      );
+    });
+  });
+
+  describe('mcpServers parameter validation', () => {
+    it('should accept session/new with empty mcpServers array', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-mcp-1',
+        params: {
+          cwd: '/test/project',
+          mcpServers: [],
+        },
+      };
+
+      const response = await adapter.processRequest(request);
+
+      expect(response.result).toBeDefined();
+      expect(response.result.sessionId).toBeDefined();
+      expect(response.error).toBeUndefined();
+    });
+
+    it('should default mcpServers to empty array when missing', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-mcp-2',
+        params: {
+          cwd: '/test/project',
+          // mcpServers intentionally omitted
+        },
+      };
+
+      const response = await adapter.processRequest(request);
+
+      expect(response.result).toBeDefined();
+      expect(response.result.sessionId).toBeDefined();
+    });
+
+    it('should accept session/new with single MCP server', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-mcp-3',
+        params: {
+          cwd: '/test/project',
+          mcpServers: [
+            {
+              name: 'test-mcp-server',
+              url: 'http://localhost:3000',
+            },
+          ],
+        },
+      };
+
+      const response = await adapter.processRequest(request);
+
+      expect(response.result).toBeDefined();
+      expect(response.result.sessionId).toBeDefined();
+    });
+
+    it('should accept session/new with multiple MCP servers', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-mcp-4',
+        params: {
+          cwd: '/test/project',
+          mcpServers: [
+            {
+              name: 'mcp-server-1',
+              url: 'http://localhost:3000',
+            },
+            {
+              name: 'mcp-server-2',
+              url: 'http://localhost:3001',
+            },
+            {
+              name: 'mcp-server-3',
+              url: 'http://localhost:3002',
+            },
+          ],
+        },
+      };
+
+      const response = await adapter.processRequest(request);
+
+      expect(response.result).toBeDefined();
+      expect(response.result.sessionId).toBeDefined();
+    });
+
+    it('should handle MCP servers without name', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-mcp-5',
+        params: {
+          cwd: '/test/project',
+          mcpServers: [
+            {
+              url: 'http://localhost:3000',
+            },
+          ],
+        },
+      };
+
+      const response = await adapter.processRequest(request);
+
+      expect(response.result).toBeDefined();
+      expect(response.result.sessionId).toBeDefined();
+    });
+
+    it('should log MCP server count', async () => {
+      const logSpy = jest.spyOn(mockLogger, 'info');
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-mcp-6',
+        params: {
+          cwd: '/test/project',
+          mcpServers: [
+            { name: 'server-1', url: 'http://localhost:3000' },
+            { name: 'server-2', url: 'http://localhost:3001' },
+          ],
+        },
+      };
+
+      await adapter.processRequest(request);
+
+      expect(logSpy).toHaveBeenCalledWith(
+        'Session created with working directory and MCP servers',
+        expect.objectContaining({
+          sessionId: expect.any(String),
+          cwd: '/test/project',
+          mcpServerCount: 2,
+          mcpServerNames: ['server-1', 'server-2'],
+        })
+      );
+    });
+
+    it('should log unnamed MCP servers as "unnamed"', async () => {
+      const logSpy = jest.spyOn(mockLogger, 'info');
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-mcp-7',
+        params: {
+          cwd: '/test/project',
+          mcpServers: [
+            { url: 'http://localhost:3000' },
+            { name: 'named-server', url: 'http://localhost:3001' },
+          ],
+        },
+      };
+
+      await adapter.processRequest(request);
+
+      expect(logSpy).toHaveBeenCalledWith(
+        'Session created with working directory and MCP servers',
+        expect.objectContaining({
+          mcpServerNames: ['unnamed', 'named-server'],
+        })
+      );
+    });
+
+    it('should handle MCP servers with complex configuration', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-mcp-8',
+        params: {
+          cwd: '/test/project',
+          mcpServers: [
+            {
+              name: 'advanced-mcp-server',
+              url: 'http://localhost:3000',
+              auth: {
+                type: 'bearer',
+                token: 'test-token',
+              },
+              capabilities: {
+                streaming: true,
+                tools: ['search', 'analyze'],
+              },
+            },
+          ],
+        },
+      };
+
+      const response = await adapter.processRequest(request);
+
+      expect(response.result).toBeDefined();
+      expect(response.result.sessionId).toBeDefined();
+    });
+  });
+
+  describe('metadata handling with cwd and mcpServers', () => {
+    it('should store cwd in metadata', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-meta-1',
+        params: {
+          cwd: '/test/project',
+          mcpServers: [],
+          metadata: {
+            name: 'Test Session',
+          },
+        },
+      };
+
+      const createResponse = await adapter.processRequest(request);
+      const sessionId = createResponse.result.sessionId;
+
+      // List sessions to verify metadata
+      const listRequest: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/list',
+        id: 'test-meta-list',
+        params: {},
+      };
+
+      const listResponse = await adapter.processRequest(listRequest);
+      const session = listResponse.result.sessions.find(
+        (s: any) => s.id === sessionId
+      );
+
+      expect(session.metadata.cwd).toBe('/test/project');
+      expect(session.metadata.name).toBe('Test Session');
+    });
+
+    it('should store mcpServers in metadata', async () => {
+      const mcpServers = [
+        { name: 'test-server', url: 'http://localhost:3000' },
+      ];
+
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-meta-2',
+        params: {
+          cwd: '/test/project',
+          mcpServers,
+        },
+      };
+
+      const createResponse = await adapter.processRequest(request);
+      const sessionId = createResponse.result.sessionId;
+
+      // List sessions to verify metadata
+      const listRequest: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/list',
+        id: 'test-meta-list-2',
+        params: {},
+      };
+
+      const listResponse = await adapter.processRequest(listRequest);
+      const session = listResponse.result.sessions.find(
+        (s: any) => s.id === sessionId
+      );
+
+      expect(session.metadata.mcpServers).toEqual(mcpServers);
+    });
+
+    it('should merge cwd and mcpServers with existing metadata', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-meta-3',
+        params: {
+          cwd: '/test/project',
+          mcpServers: [{ name: 'server-1' }],
+          metadata: {
+            name: 'My Session',
+            tags: ['test', 'development'],
+            customField: 'custom-value',
+          },
+        },
+      };
+
+      const createResponse = await adapter.processRequest(request);
+      const sessionId = createResponse.result.sessionId;
+
+      // List sessions to verify metadata
+      const listRequest: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/list',
+        id: 'test-meta-list-3',
+        params: {},
+      };
+
+      const listResponse = await adapter.processRequest(listRequest);
+      const session = listResponse.result.sessions.find(
+        (s: any) => s.id === sessionId
+      );
+
+      expect(session.metadata).toMatchObject({
+        name: 'My Session',
+        tags: ['test', 'development'],
+        customField: 'custom-value',
+        cwd: '/test/project',
+        mcpServers: [{ name: 'server-1' }],
+      });
+    });
+
+    it('should not allow metadata to override cwd', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-meta-4',
+        params: {
+          cwd: '/correct/path',
+          mcpServers: [],
+          metadata: {
+            cwd: '/wrong/path', // Should be overridden
+          },
+        },
+      };
+
+      const createResponse = await adapter.processRequest(request);
+      const sessionId = createResponse.result.sessionId;
+
+      // List sessions to verify correct cwd
+      const listRequest: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/list',
+        id: 'test-meta-list-4',
+        params: {},
+      };
+
+      const listResponse = await adapter.processRequest(listRequest);
+      const session = listResponse.result.sessions.find(
+        (s: any) => s.id === sessionId
+      );
+
+      expect(session.metadata.cwd).toBe('/correct/path');
+    });
+
+    it('should not allow metadata to override mcpServers', async () => {
+      const correctServers = [{ name: 'correct-server' }];
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-meta-5',
+        params: {
+          cwd: '/test/project',
+          mcpServers: correctServers,
+          metadata: {
+            mcpServers: [{ name: 'wrong-server' }], // Should be overridden
+          },
+        },
+      };
+
+      const createResponse = await adapter.processRequest(request);
+      const sessionId = createResponse.result.sessionId;
+
+      // List sessions to verify correct mcpServers
+      const listRequest: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/list',
+        id: 'test-meta-list-5',
+        params: {},
+      };
+
+      const listResponse = await adapter.processRequest(listRequest);
+      const session = listResponse.result.sessions.find(
+        (s: any) => s.id === sessionId
+      );
+
+      expect(session.metadata.mcpServers).toEqual(correctServers);
+    });
+  });
+
+  describe('response format per ACP spec', () => {
+    it('should return sessionId in response', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-response-1',
+        params: {
+          cwd: '/test/project',
+          mcpServers: [],
+        },
+      };
+
+      const response = await adapter.processRequest(request);
+
+      expect(response.result).toBeDefined();
+      expect(response.result.sessionId).toBeDefined();
+      expect(typeof response.result.sessionId).toBe('string');
+      expect(response.result.sessionId.length).toBeGreaterThan(0);
+    });
+
+    it('should not include modes or models in response (not supported)', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-response-2',
+        params: {
+          cwd: '/test/project',
+          mcpServers: [],
+        },
+      };
+
+      const response = await adapter.processRequest(request);
+
+      expect(response.result.modes).toBeUndefined();
+      expect(response.result.models).toBeUndefined();
+    });
+
+    it('should return proper JSON-RPC 2.0 response structure', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-response-3',
+        params: {
+          cwd: '/test/project',
+          mcpServers: [],
+        },
+      };
+
+      const response = await adapter.processRequest(request);
+
+      expect(response.jsonrpc).toBe('2.0');
+      expect(response.id).toBe('test-response-3');
+      expect(response.result).toBeDefined();
+      expect(response.error).toBeUndefined();
+    });
+
+    it('should return error response for validation failures', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-response-4',
+        params: {
+          // cwd missing
+          mcpServers: [],
+        },
+      };
+
+      const response = await adapter.processRequest(request);
+
+      expect(response.jsonrpc).toBe('2.0');
+      expect(response.id).toBe('test-response-4');
+      expect(response.error).toBeDefined();
+      expect(response.error?.code).toBeDefined();
+      expect(response.error?.message).toBeDefined();
+      expect(response.result).toBeUndefined();
+    });
+  });
+
+  describe('edge cases and error handling', () => {
+    it('should handle missing params object', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-edge-1',
+        // params intentionally omitted
+      };
+
+      const response = await adapter.processRequest(request);
+
+      expect(response.error).toBeDefined();
+      expect(response.error?.message).toContain('cwd');
+    });
+
+    it('should handle null params object', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-edge-2',
+        params: null as any,
+      };
+
+      const response = await adapter.processRequest(request);
+
+      expect(response.error).toBeDefined();
+    });
+
+    it('should handle params with wrong type', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-edge-3',
+        params: 'invalid' as any,
+      };
+
+      const response = await adapter.processRequest(request);
+
+      expect(response.error).toBeDefined();
+    });
+
+    it('should handle concurrent session creation with same cwd', async () => {
+      const requests = Array.from({ length: 5 }, (_, i) => ({
+        jsonrpc: '2.0' as const,
+        method: 'session/new',
+        id: `concurrent-${i}`,
+        params: {
+          cwd: '/same/project/path',
+          mcpServers: [],
+          metadata: { name: `Session ${i}` },
+        },
+      }));
+
+      const responses = await Promise.all(
+        requests.map((req) => adapter.processRequest(req))
+      );
+
+      // All should succeed
+      responses.forEach((response) => {
+        expect(response.result).toBeDefined();
+        expect(response.result.sessionId).toBeDefined();
+      });
+
+      // All session IDs should be unique
+      const sessionIds = responses.map((r) => r.result.sessionId);
+      const uniqueIds = new Set(sessionIds);
+      expect(uniqueIds.size).toBe(sessionIds.length);
+    });
+  });
+});

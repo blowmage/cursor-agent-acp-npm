@@ -360,7 +360,7 @@ export interface ClientCapabilities {
 export interface AgentCapabilities {
   loadSession?: boolean; // session/load method available (default: false)
   promptCapabilities?: PromptCapabilities;
-  mcp?: McpCapabilities;
+  mcpCapabilities?: McpCapabilities; // Per ACP spec: use "mcpCapabilities" not "mcp"
   _meta?: Record<string, any>; // Custom capability extensions
 }
 
@@ -388,9 +388,55 @@ export interface ServerCapabilities extends AgentCapabilities {
   contentTypes?: string[];
 }
 
+// ============================================================================
+// MCP Server Configuration Types
+// ============================================================================
+
+// Per ACP spec: Environment variable for MCP server
+export interface McpEnvVariable {
+  name: string; // The name of the environment variable
+  value: string; // The value of the environment variable
+}
+
+// Per ACP spec: HTTP header for HTTP/SSE transports
+export interface McpHttpHeader {
+  name: string; // The name of the HTTP header
+  value: string; // The value to set for the HTTP header
+}
+
+// Per ACP spec: Stdio transport configuration (default, all agents MUST support)
+export interface McpStdioServerConfig {
+  name: string; // Human-readable identifier for the server
+  command: string; // Absolute path to the MCP server executable
+  args: string[]; // Command-line arguments to pass to the server
+  env?: McpEnvVariable[]; // Optional environment variables
+}
+
+// Per ACP spec: HTTP transport configuration (optional capability)
+export interface McpHttpServerConfig {
+  type: 'http'; // Must be "http" to indicate HTTP transport
+  name: string; // Human-readable identifier for the server
+  url: string; // The URL of the MCP server
+  headers: McpHttpHeader[]; // HTTP headers to include in requests
+}
+
+// Per ACP spec: SSE transport configuration (optional capability, deprecated)
+export interface McpSseServerConfig {
+  type: 'sse'; // Must be "sse" to indicate SSE transport
+  name: string; // Human-readable identifier for the server
+  url: string; // The URL of the SSE endpoint
+  headers: McpHttpHeader[]; // HTTP headers for establishing SSE connection
+}
+
+// Union type for all MCP server configurations
+export type McpServerConfig =
+  | McpStdioServerConfig
+  | McpHttpServerConfig
+  | McpSseServerConfig;
+
 export interface SessionNewParams {
   cwd: string; // Per ACP spec: absolute path to working directory
-  mcpServers: any[]; // Array of MCP server configs
+  mcpServers: McpServerConfig[]; // Array of MCP server configs
 }
 
 export interface SessionNewResult {
@@ -424,14 +470,14 @@ export interface ModelInfo {
 }
 
 export interface SessionLoadParams {
-  sessionId: string;
+  sessionId: string; // Required: session to resume
+  cwd: string; // Required: absolute path to working directory
+  mcpServers: McpServerConfig[]; // Required: MCP servers to connect to
 }
 
-export interface SessionLoadResult {
-  sessionId: string;
-  metadata: SessionMetadata;
-  conversation: ConversationMessage[];
-}
+// Per ACP spec: After streaming all conversation via session/update notifications,
+// the session/load response should return null
+export type SessionLoadResult = null;
 
 export interface SessionListParams {
   limit?: number;

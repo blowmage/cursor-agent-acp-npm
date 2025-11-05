@@ -236,7 +236,7 @@ export class InitializationHandler {
       },
 
       // Per ACP spec: MCP server connection capabilities
-      mcp: {
+      mcpCapabilities: {
         http: false, // We don't connect to MCP servers over HTTP yet
         sse: false, // We don't connect to MCP servers over SSE
       },
