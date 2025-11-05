@@ -35,34 +35,32 @@ describe('InitializationHandler', () => {
             // Assert
             expect(result).toBeValidAcpResponse();
             expect(result.protocolVersion).toBe(setup_1.TEST_CONSTANTS.ACP_PROTOCOL_VERSION);
-            expect(result.serverInfo).toEqual({
+            expect(result.agentInfo).toEqual({
                 name: 'cursor-agent-acp',
-                version: '0.1.0',
+                title: 'Cursor Agent ACP Adapter',
+                version: expect.any(String), // Dynamic version from package.json
             });
-            // Verify all required capabilities are declared
-            expect(result.capabilities).toEqual({
-                sessionManagement: true,
-                streaming: true,
-                toolCalling: true,
-                fileSystem: mockConfig.tools.filesystem.enabled,
-                terminal: mockConfig.tools.terminal.enabled,
-                contentTypes: ['text', 'code', 'image'],
-            });
+            // Verify all required capabilities are declared per ACP spec
+            expect(result.agentCapabilities).toBeDefined();
+            expect(result.agentCapabilities.loadSession).toBe(true);
+            expect(result.agentCapabilities.promptCapabilities).toBeDefined();
+            expect(result.agentCapabilities.mcp).toBeDefined();
+            expect(result.authMethods).toEqual([]);
         });
         it('should set correct protocol version', async () => {
             // Arrange
             const params = {
-                protocolVersion: '0.1.0',
+                protocolVersion: 1,
             };
             // Act
             const result = await handler.initialize(params);
             // Assert
-            expect(result.protocolVersion).toBe('0.1.0');
+            expect(result.protocolVersion).toBe(1);
         });
         it('should handle client info when provided', async () => {
             // Arrange
             const params = {
-                protocolVersion: '0.1.0',
+                protocolVersion: 1,
                 clientInfo: {
                     name: 'zed-editor',
                     version: '0.143.0',
@@ -72,19 +70,19 @@ describe('InitializationHandler', () => {
             const result = await handler.initialize(params);
             // Assert
             expect(result).toBeDefined();
-            expect(result.serverInfo.name).toBe('cursor-agent-acp');
+            expect(result.agentInfo.name).toBe('cursor-agent-acp');
             // The handler should log client info but not return it
         });
         it('should handle missing client info gracefully', async () => {
             // Arrange
             const params = {
-                protocolVersion: '0.1.0',
+                protocolVersion: 1,
             };
             // Act
             const result = await handler.initialize(params);
             // Assert
             expect(result).toBeDefined();
-            expect(result.serverInfo.name).toBe('cursor-agent-acp');
+            expect(result.agentInfo.name).toBe('cursor-agent-acp');
         });
         it('should reflect filesystem capability based on config', async () => {
             // Arrange
@@ -97,12 +95,12 @@ describe('InitializationHandler', () => {
             };
             const disabledHandler = new initialization_1.InitializationHandler(disabledConfig, mockLogger);
             const params = {
-                protocolVersion: '0.1.0',
+                protocolVersion: 1,
             };
             // Act
             const result = await disabledHandler.initialize(params);
             // Assert
-            expect(result.capabilities.fileSystem).toBe(false);
+            expect(result.agentCapabilities._meta?.fileSystem).toBe(false);
         });
         it('should reflect terminal capability based on config', async () => {
             // Arrange
@@ -115,20 +113,20 @@ describe('InitializationHandler', () => {
             };
             const disabledHandler = new initialization_1.InitializationHandler(disabledConfig, mockLogger);
             const params = {
-                protocolVersion: '0.1.0',
+                protocolVersion: 1,
             };
             // Act
             const result = await disabledHandler.initialize(params);
             // Assert
-            expect(result.capabilities.terminal).toBe(false);
+            expect(result.agentCapabilities._meta?.terminal).toBe(false);
         });
         it('should handle invalid protocol version', async () => {
             // Arrange
             const params = {
-                protocolVersion: 'invalid-version',
+                protocolVersion: 'invalid-version', // String instead of integer
             };
-            // Act & Assert
-            await expect(handler.initialize(params)).rejects.toThrow('Unsupported protocol version');
+            // Act & Assert - Should reject invalid protocol versions per ACP spec
+            await expect(handler.initialize(params)).rejects.toThrow('Protocol version must be an integer');
         });
         it('should handle missing protocol version', async () => {
             // Arrange
@@ -136,28 +134,30 @@ describe('InitializationHandler', () => {
             // Act & Assert
             await expect(handler.initialize(params)).rejects.toThrow('Protocol version is required');
         });
-        it('should validate cursor-agent availability during initialization', async () => {
+        it('should succeed even if cursor-agent is unavailable (non-blocking per ACP spec)', async () => {
             // Arrange
             const params = {
-                protocolVersion: '0.1.0',
+                protocolVersion: 1,
             };
             // Mock cursor-agent being unavailable
-            const unavailableConfig = { ...mockConfig };
-            const unavailableHandler = new initialization_1.InitializationHandler(unavailableConfig, mockLogger);
-            // Mock the connectivity test to fail
             jest
-                .spyOn(unavailableHandler, 'testCursorConnectivity')
+                .spyOn(handler, 'testCursorConnectivity')
                 .mockResolvedValue({
                 success: false,
                 error: 'cursor-agent not found',
             });
-            // Act & Assert
-            await expect(unavailableHandler.initialize(params)).rejects.toThrow('cursor-agent not found');
+            // Act
+            const result = await handler.initialize(params);
+            // Assert - should succeed but with limited capabilities
+            expect(result).toBeDefined();
+            expect(result.protocolVersion).toBe(1);
+            expect(result.agentCapabilities).toBeDefined();
+            expect(result.agentCapabilities._meta?.cursorAvailable).toBe(false);
         });
-        it('should validate cursor-agent authentication during initialization', async () => {
+        it('should succeed even if cursor-agent authentication fails (non-blocking per ACP spec)', async () => {
             // Arrange
             const params = {
-                protocolVersion: '0.1.0',
+                protocolVersion: 1,
             };
             // Mock cursor-agent being unauthenticated
             jest.spyOn(handler, 'testCursorConnectivity').mockResolvedValue({
@@ -165,13 +165,17 @@ describe('InitializationHandler', () => {
                 authenticated: false,
                 error: 'Authentication required',
             });
-            // Act & Assert
-            await expect(handler.initialize(params)).rejects.toThrow('Authentication required');
+            // Act
+            const result = await handler.initialize(params);
+            // Assert - should succeed but with limited capabilities
+            expect(result).toBeDefined();
+            expect(result.agentCapabilities).toBeDefined();
+            expect(result.agentCapabilities._meta?.cursorAvailable).toBe(false);
         });
         it('should succeed when cursor-agent is available and authenticated', async () => {
             // Arrange
             const params = {
-                protocolVersion: '0.1.0',
+                protocolVersion: 1,
             };
             // Mock cursor-agent being available and authenticated
             jest.spyOn(handler, 'testCursorConnectivity').mockResolvedValue({
@@ -183,12 +187,12 @@ describe('InitializationHandler', () => {
             const result = await handler.initialize(params);
             // Assert
             expect(result).toBeDefined();
-            expect(result.capabilities).toBeDefined();
+            expect(result.agentCapabilities).toBeDefined();
         });
         it('should handle initialization timeout gracefully', async () => {
             // Arrange
             const params = {
-                protocolVersion: '0.1.0',
+                protocolVersion: 1,
             };
             // Mock a timeout scenario
             jest
@@ -201,7 +205,7 @@ describe('InitializationHandler', () => {
             // Arrange
             const logSpy = jest.spyOn(mockLogger, 'info');
             const params = {
-                protocolVersion: '0.1.0',
+                protocolVersion: 1,
                 clientInfo: { name: 'test-client', version: '1.0.0' },
             };
             // Mock successful connectivity test
@@ -218,7 +222,7 @@ describe('InitializationHandler', () => {
             // Arrange
             const logSpy = jest.spyOn(mockLogger, 'info');
             const params = {
-                protocolVersion: '0.1.0',
+                protocolVersion: 1,
             };
             // Mock successful connectivity test
             jest.spyOn(handler, 'testCursorConnectivity').mockResolvedValue({
@@ -241,7 +245,7 @@ describe('InitializationHandler', () => {
         it('should handle undefined client info properties', async () => {
             // Arrange
             const params = {
-                protocolVersion: '0.1.0',
+                protocolVersion: 1,
                 clientInfo: {
                     name: undefined,
                     version: undefined,

@@ -15,6 +15,8 @@ const mockSessionManager = {
     updateSession: jest.fn(),
     deleteSession: jest.fn(),
     cleanup: jest.fn(),
+    markSessionProcessing: jest.fn(),
+    unmarkSessionProcessing: jest.fn(),
 };
 const mockCursorBridge = {
     sendPrompt: jest.fn(),
@@ -63,6 +65,7 @@ describe('PromptHandler', () => {
             cursorBridge: mockCursorBridge,
             config: mockConfig,
             logger: mockLogger,
+            sendNotification: jest.fn(),
         });
     });
     describe('processPrompt', () => {
@@ -75,7 +78,7 @@ describe('PromptHandler', () => {
                 content: [
                     {
                         type: 'text',
-                        text: 'Hello, how can you help me with TypeScript?',
+                        value: 'Hello, how can you help me with TypeScript?',
                     },
                 ],
                 stream: false,
@@ -105,15 +108,18 @@ describe('PromptHandler', () => {
                 expect(response.jsonrpc).toBe('2.0');
                 expect(response.id).toBe('test-request-1');
                 expect(response.result).toBeDefined();
-                expect(response.result.messageId).toMatch(/^msg_\d+_[a-z0-9]+$/);
-                expect(response.result.content).toBeInstanceOf(Array);
-                expect(response.result.content.length).toBeGreaterThan(0);
+                // Per ACP spec, session/prompt returns immediately with empty result
+                // Content is sent via session/update notifications asynchronously
                 expect(mockSessionManager.loadSession).toHaveBeenCalledWith('test-session-1');
+                // Wait a bit for async processing
+                await new Promise((resolve) => setTimeout(resolve, 50));
                 expect(mockSessionManager.addMessage).toHaveBeenCalledTimes(2); // User and assistant messages
                 expect(mockCursorBridge.sendPrompt).toHaveBeenCalledTimes(1);
             });
             it('should add user message to session', async () => {
                 await promptHandler.processPrompt(validRequest);
+                // Wait for async processing
+                await new Promise((resolve) => setTimeout(resolve, 50));
                 const addMessageCalls = mockSessionManager.addMessage.mock.calls;
                 const userMessageCall = addMessageCalls[0];
                 expect(userMessageCall[0]).toBe('test-session-1');
@@ -123,6 +129,8 @@ describe('PromptHandler', () => {
             });
             it('should add assistant message to session', async () => {
                 await promptHandler.processPrompt(validRequest);
+                // Wait for async processing
+                await new Promise((resolve) => setTimeout(resolve, 50));
                 const addMessageCalls = mockSessionManager.addMessage.mock.calls;
                 const assistantMessageCall = addMessageCalls[1];
                 expect(assistantMessageCall[0]).toBe('test-session-1');
@@ -131,13 +139,18 @@ describe('PromptHandler', () => {
             });
             it('should process content through ContentProcessor', async () => {
                 await promptHandler.processPrompt(validRequest);
+                // Wait for async processing
+                await new Promise((resolve) => setTimeout(resolve, 50));
                 expect(mockCursorBridge.sendPrompt).toHaveBeenCalledWith({
                     sessionId: 'test-session-1',
                     content: expect.objectContaining({
-                        text: expect.stringContaining('Hello, how can you help me with TypeScript?'),
+                        value: expect.stringContaining('Hello, how can you help me with TypeScript?'),
                         metadata: expect.any(Object),
                     }),
-                    metadata: { source: 'test' },
+                    metadata: expect.objectContaining({
+                        source: 'test',
+                        cwd: expect.any(String),
+                    }),
                 });
             });
         });
@@ -191,12 +204,16 @@ describe('PromptHandler', () => {
                 expect(response.jsonrpc).toBe('2.0');
                 expect(response.id).toBe('test-request-1');
                 expect(response.result).toBeDefined();
-                expect(response.result.messageId).toMatch(/^msg_\d+_[a-z0-9]+$/);
+                // Per ACP spec, session/prompt returns immediately with empty result
+                // Wait for async processing
+                await new Promise((resolve) => setTimeout(resolve, 50));
                 expect(mockCursorBridge.sendStreamingPrompt).toHaveBeenCalledTimes(1);
                 expect(mockSessionManager.addMessage).toHaveBeenCalledTimes(2);
             });
             it('should handle streaming chunks correctly', async () => {
                 await promptHandler.processPrompt(streamingRequest);
+                // Wait for async processing to start
+                await new Promise((resolve) => setTimeout(resolve, 50));
                 const streamingCall = mockCursorBridge.sendStreamingPrompt.mock.calls[0][0];
                 expect(streamingCall.onChunk).toBeDefined();
                 expect(streamingCall.onProgress).toBeDefined();
@@ -209,6 +226,8 @@ describe('PromptHandler', () => {
                 // Note: This is a bit tricky to test due to async nature,
                 // but the important thing is that it cleans up afterward
                 await responsePromise;
+                // Wait for async processing to complete
+                await new Promise((resolve) => setTimeout(resolve, 100));
                 // After completion, stream count should be back to 0
                 expect(promptHandler.getActiveStreamCount()).toBe(0);
             });
@@ -232,7 +251,7 @@ describe('PromptHandler', () => {
                     method: 'session/prompt',
                     id: 'test-request-1',
                     params: {
-                        content: [{ type: 'text', text: 'Hello' }],
+                        content: [{ type: 'text', value: 'Hello' }],
                     },
                 };
                 const response = await promptHandler.processPrompt(invalidRequest);
@@ -251,7 +270,7 @@ describe('PromptHandler', () => {
                 };
                 const response = await promptHandler.processPrompt(invalidRequest);
                 expect(response.error).toBeDefined();
-                expect(response.error?.message).toContain('content is required and must be a non-empty array');
+                expect(response.error?.message).toContain('content/prompt is required and must be a non-empty array');
             });
             it('should reject invalid content blocks', async () => {
                 const invalidRequest = {
@@ -260,7 +279,7 @@ describe('PromptHandler', () => {
                     id: 'test-request-1',
                     params: {
                         sessionId: 'test-session-1',
-                        content: [{ type: 'invalid', data: 'test' }],
+                        content: [{ type: 'invalid', value: 'test' }],
                     },
                 };
                 const response = await promptHandler.processPrompt(invalidRequest);
@@ -274,7 +293,7 @@ describe('PromptHandler', () => {
                     ...validRequest,
                     params: {
                         ...validRequest.params,
-                        content: [{ type: 'text', text: 'Hello world' }],
+                        content: [{ type: 'text', value: 'Hello world' }],
                     },
                 };
                 mockSessionManager.loadSession.mockResolvedValue({});
@@ -293,7 +312,7 @@ describe('PromptHandler', () => {
                         content: [
                             {
                                 type: 'code',
-                                code: 'console.log("hello");',
+                                value: 'console.log("hello");',
                                 language: 'javascript',
                                 filename: 'test.js',
                             },
@@ -316,7 +335,7 @@ describe('PromptHandler', () => {
                         content: [
                             {
                                 type: 'image',
-                                data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+                                value: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
                                 mimeType: 'image/png',
                                 filename: 'test.png',
                             },
@@ -341,14 +360,24 @@ describe('PromptHandler', () => {
                 expect(response.error?.message).toContain('Session not found');
             });
             it('should handle cursor bridge errors', async () => {
+                const mockSendNotification = jest.fn();
+                const handlerWithMock = new prompt_1.PromptHandler({
+                    sessionManager: mockSessionManager,
+                    cursorBridge: mockCursorBridge,
+                    config: mockConfig,
+                    logger: mockLogger,
+                    sendNotification: mockSendNotification,
+                });
                 mockSessionManager.loadSession.mockResolvedValue({});
                 mockCursorBridge.sendPrompt.mockResolvedValue({
                     success: false,
                     error: 'Cursor CLI is not available',
                 });
-                const response = await promptHandler.processPrompt(validRequest);
-                expect(response.error).toBeDefined();
-                expect(response.error?.message).toContain('Cursor CLI error');
+                const response = await handlerWithMock.processPrompt(validRequest);
+                // Per ACP spec: errors during processing should return stopReason: 'refusal'
+                expect(response.error).toBeUndefined();
+                expect(response.result).toBeDefined();
+                expect(response.result?.stopReason).toBe('refusal');
             });
             it('should handle unexpected errors', async () => {
                 mockSessionManager.loadSession.mockRejectedValue(new Error('Unexpected database error'));
@@ -382,7 +411,7 @@ describe('PromptHandler', () => {
                 id: 'test-stream-1',
                 params: {
                     sessionId: 'test-session-1',
-                    content: [{ type: 'text', text: 'Hello' }],
+                    content: [{ type: 'text', value: 'Hello' }],
                     stream: true,
                 },
             };
@@ -410,14 +439,21 @@ describe('PromptHandler', () => {
                     content: [
                         {
                             type: 'text',
-                            text: 'Hello, how can you help me with TypeScript?',
+                            value: 'Hello, how can you help me with TypeScript?',
                         },
                     ],
                     stream: false,
                     metadata: { source: 'test' },
                 },
             };
-            mockSessionManager.loadSession.mockResolvedValue({});
+            mockSessionManager.loadSession.mockResolvedValue({
+                id: 'test-session-1',
+                metadata: { name: 'Test Session', cwd: '/test/dir' },
+                conversation: [],
+                state: { lastActivity: new Date(), messageCount: 0 },
+                createdAt: new Date(),
+                updatedAt: new Date(),
+            });
             mockCursorBridge.sendPrompt.mockResolvedValue({
                 success: true,
                 stdout: 'Response 1',
@@ -426,9 +462,16 @@ describe('PromptHandler', () => {
             const request2 = { ...testRequest, id: 'req-2' };
             const response1 = await promptHandler.processPrompt(request1);
             const response2 = await promptHandler.processPrompt(request2);
-            expect(response1.result?.messageId).toBeDefined();
-            expect(response2.result?.messageId).toBeDefined();
-            expect(response1.result?.messageId).not.toBe(response2.result?.messageId);
+            // Both should return empty result (per ACP spec)
+            expect(response1.result).toBeDefined();
+            expect(response2.result).toBeDefined();
+            // Wait for async processing
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            // Verify messages were added with unique IDs
+            const addMessageCalls = mockSessionManager.addMessage.mock.calls;
+            expect(addMessageCalls.length).toBeGreaterThanOrEqual(2);
+            const messageIds = addMessageCalls.map((call) => call[1].id);
+            expect(new Set(messageIds).size).toBe(messageIds.length); // All IDs should be unique
         });
     });
     describe('content processing integration', () => {
@@ -442,7 +485,7 @@ describe('PromptHandler', () => {
                     content: [
                         {
                             type: 'text',
-                            text: 'Hello, how can you help me with TypeScript?',
+                            value: 'Hello, how can you help me with TypeScript?',
                         },
                     ],
                     stream: false,
@@ -454,17 +497,24 @@ describe('PromptHandler', () => {
                 params: {
                     ...testRequest.params,
                     content: [
-                        { type: 'text', text: 'Here is some code:' },
+                        { type: 'text', value: 'Here is some code:' },
                         {
                             type: 'code',
-                            code: 'const x = 42;',
+                            value: 'const x = 42;',
                             language: 'typescript',
                         },
-                        { type: 'text', text: 'What do you think?' },
+                        { type: 'text', value: 'What do you think?' },
                     ],
                 },
             };
-            mockSessionManager.loadSession.mockResolvedValue({});
+            mockSessionManager.loadSession.mockResolvedValue({
+                id: 'test-session-1',
+                metadata: { name: 'Test Session', cwd: '/test/dir' },
+                conversation: [],
+                state: { lastActivity: new Date(), messageCount: 0 },
+                createdAt: new Date(),
+                updatedAt: new Date(),
+            });
             mockCursorBridge.sendPrompt.mockResolvedValue({
                 success: true,
                 stdout: 'Great code!',
@@ -472,6 +522,8 @@ describe('PromptHandler', () => {
             const response = await promptHandler.processPrompt(mixedContentRequest);
             expect(response.error).toBeUndefined();
             expect(response.result).toBeDefined();
+            // Wait for async processing
+            await new Promise((resolve) => setTimeout(resolve, 50));
             // Verify content was processed
             const sendPromptCall = mockCursorBridge.sendPrompt.mock.calls[0][0];
             expect(sendPromptCall.content.value).toContain('Here is some code:');

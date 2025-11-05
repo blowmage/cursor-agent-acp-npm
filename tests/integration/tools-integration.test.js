@@ -111,6 +111,8 @@ describe('Tool System Integration', () => {
         catch (error) {
             // Ignore cleanup errors
         }
+        // Give time for all async cleanup to complete
+        await new Promise((resolve) => setTimeout(resolve, 100));
     });
     describe('Tool Registry Integration', () => {
         test('should initialize all tool providers', () => {
@@ -271,28 +273,26 @@ export class Calculator {
             expect(listSrcResult.result.entries.some((e) => e.name === 'calculator.ts')).toBe(true);
         });
         test('should handle terminal and file system integration', async () => {
-            // Step 1: Execute a command that creates a file
+            const testFilePath = path.join(testProjectDir, 'terminal-test.txt');
+            // Step 1: Use terminal to echo content and write to file using shell
+            // Use shell -c to properly handle redirection
             const createFileCall = {
                 id: 'cmd-1',
                 name: 'execute_command',
                 parameters: {
-                    command: 'echo',
-                    args: [
-                        'Hello from terminal',
-                        '>',
-                        path.join(testProjectDir, 'terminal-test.txt'),
-                    ],
+                    command: 'sh',
+                    args: ['-c', `echo "Hello from terminal" > "${testFilePath}"`],
                     working_directory: testProjectDir,
                 },
             };
             const cmdResult = await registry.executeTool(createFileCall);
+            // If terminal command fails (might not have sh on all systems), use file system
             if (!cmdResult.success) {
-                // Command might fail on some systems, use alternative approach
                 const writeCall = {
                     id: 'write-alt-1',
                     name: 'write_file',
                     parameters: {
-                        path: path.join(testProjectDir, 'terminal-test.txt'),
+                        path: testFilePath,
                         content: 'Hello from terminal\n',
                     },
                 };
@@ -304,7 +304,7 @@ export class Calculator {
                 id: 'read-2',
                 name: 'read_file',
                 parameters: {
-                    path: path.join(testProjectDir, 'terminal-test.txt'),
+                    path: testFilePath,
                 },
             };
             const readResult = await registry.executeTool(readCall);
@@ -315,7 +315,7 @@ export class Calculator {
                 id: 'info-2',
                 name: 'get_file_info',
                 parameters: {
-                    path: path.join(testProjectDir, 'terminal-test.txt'),
+                    path: testFilePath,
                 },
             };
             const infoResult = await registry.executeTool(infoCall);
@@ -388,7 +388,7 @@ export class Calculator {
             const result = await registry.executeTool(call);
             expect(result.success).toBe(true);
             expect(result.metadata).toBeDefined();
-            expect(result.metadata?.duration).toBeGreaterThan(0);
+            expect(result.metadata?.duration).toBeGreaterThanOrEqual(0); // Duration can be 0 for very fast operations
             expect(result.metadata?.executedAt).toBeInstanceOf(Date);
             expect(result.metadata?.toolName).toBe('list_directory');
         });

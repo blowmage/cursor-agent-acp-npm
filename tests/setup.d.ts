@@ -51,6 +51,6 @@ export declare const TEST_CONSTANTS: {
   readonly MOCK_USER_ID: 'test-user';
   readonly SAMPLE_TEXT_CONTENT: 'This is sample text content for testing';
   readonly SAMPLE_CODE_CONTENT: 'console.log("Hello, world!");';
-  readonly ACP_PROTOCOL_VERSION: '0.1.0';
+  readonly ACP_PROTOCOL_VERSION: 1;
 };
 //# sourceMappingURL=setup.d.ts.map

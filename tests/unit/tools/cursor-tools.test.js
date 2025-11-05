@@ -153,7 +153,12 @@ describe('CursorToolsProvider', () => {
             expect(result.result.query).toBe('function test');
             expect(result.result.results).toHaveLength(1);
             expect(result.result.results[0].file).toBe('src/test.ts');
-            expect(mockCliBridge.executeCommand).toHaveBeenCalledWith('cursor-agent', expect.arrayContaining(['search', '--query', 'function test']));
+            expect(mockCliBridge.executeCommand).toHaveBeenCalledWith(expect.arrayContaining([
+                'cursor-agent',
+                'search',
+                '--query',
+                'function test',
+            ]));
         });
         test('should handle search with file pattern and case sensitivity', async () => {
             const mockResult = {
@@ -171,7 +176,8 @@ describe('CursorToolsProvider', () => {
                 case_sensitive: true,
                 max_results: 20,
             });
-            expect(mockCliBridge.executeCommand).toHaveBeenCalledWith('cursor-agent', expect.arrayContaining([
+            expect(mockCliBridge.executeCommand).toHaveBeenCalledWith([
+                'cursor-agent',
                 'search',
                 '--query',
                 'TestClass',
@@ -182,7 +188,7 @@ describe('CursorToolsProvider', () => {
                 '20',
                 '--context',
                 '3',
-            ]));
+            ]);
         });
         test('should handle search failure', async () => {
             const mockResult = {
@@ -225,7 +231,7 @@ src/file2.ts:25:1:const test = () => {`,
                 line: 10,
                 column: 5,
                 content: 'function test() {',
-                context: ['  return true;'],
+                context: ['src/file1.ts:11:  return true;'],
             });
         });
     });
@@ -260,7 +266,8 @@ src/file2.ts:25:1:const test = () => {`,
             expect(result.result.file).toBe('src/test.ts');
             expect(result.result.structure.functions).toContain('test');
             expect(result.result.metrics.complexity).toBe(3);
-            expect(mockCliBridge.executeCommand).toHaveBeenCalledWith('cursor-agent', expect.arrayContaining([
+            expect(mockCliBridge.executeCommand).toHaveBeenCalledWith(expect.arrayContaining([
+                'cursor-agent',
                 'analyze',
                 expect.stringContaining('test.ts'),
                 '--metrics',
@@ -282,7 +289,8 @@ src/file2.ts:25:1:const test = () => {`,
                 analysis_type: 'dependencies',
                 include_metrics: false,
             });
-            expect(mockCliBridge.executeCommand).toHaveBeenCalledWith('cursor-agent', expect.arrayContaining([
+            expect(mockCliBridge.executeCommand).toHaveBeenCalledWith(expect.arrayContaining([
+                'cursor-agent',
                 'analyze',
                 expect.stringContaining('component.tsx'),
                 '--type',
@@ -336,7 +344,12 @@ src/file2.ts:25:1:const test = () => {`,
             expect(result.result.applied).toBe(true);
             expect(result.result.changesCount).toBe(1);
             expect(fs.writeFile).toHaveBeenCalledWith(expect.stringContaining('.cursor-changes.json'), expect.stringContaining(JSON.stringify(changes, null, 2)));
-            expect(mockCliBridge.executeCommand).toHaveBeenCalledWith('cursor-agent', expect.arrayContaining(['apply-changes', '--backup', '--changes-file']));
+            expect(mockCliBridge.executeCommand).toHaveBeenCalledWith(expect.arrayContaining([
+                'cursor-agent',
+                'apply-changes',
+                '--backup',
+                '--changes-file',
+            ]));
         });
         test('should handle dry run mode', async () => {
             const mockResult = {
@@ -366,7 +379,7 @@ src/file2.ts:25:1:const test = () => {`,
             });
             expect(result.success).toBe(true);
             expect(result.result.applied).toBe(false);
-            expect(mockCliBridge.executeCommand).toHaveBeenCalledWith('cursor-agent', expect.arrayContaining(['apply-changes', '--dry-run']));
+            expect(mockCliBridge.executeCommand).toHaveBeenCalledWith(expect.arrayContaining(['cursor-agent', 'apply-changes', '--dry-run']));
         });
         test('should handle disabled code modification', async () => {
             const restrictedConfig = {
@@ -449,7 +462,8 @@ src/file2.ts:25:1:const test = () => {`,
             expect(result.success).toBe(true);
             expect(result.result.framework).toBe('jest');
             expect(result.result.summary.total).toBe(15);
-            expect(mockCliBridge.executeCommand).toHaveBeenCalledWith('cursor-agent', expect.arrayContaining([
+            expect(mockCliBridge.executeCommand).toHaveBeenCalledWith([
+                'cursor-agent',
                 'test',
                 '--pattern',
                 '**/*.test.ts',
@@ -458,7 +472,7 @@ src/file2.ts:25:1:const test = () => {`,
                 '--coverage',
                 '--timeout',
                 '60',
-            ]), { timeout: 60000 });
+            ], { timeout: 60000 });
         });
         test('should handle test failures', async () => {
             const mockResult = {
@@ -531,12 +545,13 @@ src/file2.ts:25:1:const test = () => {`,
             expect(result.result.name).toBe('test-project');
             expect(result.result.dependencies.react).toBe('^18.0.0');
             expect(result.result.scripts.test).toBe('jest');
-            expect(mockCliBridge.executeCommand).toHaveBeenCalledWith('cursor-agent', expect.arrayContaining([
+            expect(mockCliBridge.executeCommand).toHaveBeenCalledWith([
+                'cursor-agent',
                 'info',
                 '--dependencies',
                 '--scripts',
                 '--structure',
-            ]));
+            ]);
         });
         test('should handle minimal project info request', async () => {
             const mockResult = {
@@ -556,7 +571,10 @@ src/file2.ts:25:1:const test = () => {`,
                 include_structure: false,
             });
             expect(result.success).toBe(true);
-            expect(mockCliBridge.executeCommand).toHaveBeenCalledWith('cursor-agent', ['info']);
+            expect(mockCliBridge.executeCommand).toHaveBeenCalledWith([
+                'cursor-agent',
+                'info',
+            ]);
         });
     });
     describe('explainCode', () => {
@@ -587,16 +605,17 @@ src/file2.ts:25:1:const test = () => {`,
             expect(result.result.file).toBe('src/search.ts');
             expect(result.result.explanation).toContain('binary search');
             expect(result.result.suggestions).toHaveLength(2);
-            expect(mockCliBridge.executeCommand).toHaveBeenCalledWith('cursor-agent', expect.arrayContaining([
+            expect(mockCliBridge.executeCommand).toHaveBeenCalledWith([
+                'cursor-agent',
                 'explain',
-                expect.stringContaining('search.ts'),
+                'src/search.ts',
                 '--start-line',
                 '10',
                 '--end-line',
                 '25',
                 '--type',
                 'detailed',
-            ]));
+            ]);
         });
         test('should explain entire file when no line range specified', async () => {
             const mockResult = {
@@ -615,12 +634,13 @@ src/file2.ts:25:1:const test = () => {`,
                 file_path: 'src/utils.ts',
                 explanation_type: 'summary',
             });
-            expect(mockCliBridge.executeCommand).toHaveBeenCalledWith('cursor-agent', expect.arrayContaining([
+            expect(mockCliBridge.executeCommand).toHaveBeenCalledWith([
+                'cursor-agent',
                 'explain',
-                expect.stringContaining('utils.ts'),
+                'src/utils.ts',
                 '--type',
                 'summary',
-            ]));
+            ]);
         });
     });
     describe('error handling', () => {

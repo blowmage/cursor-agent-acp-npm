@@ -18,6 +18,8 @@
   "scripts": {
     "build": "tsc",
     "build:watch": "tsc --watch",
+    "ci": "npm run test:all && npm run lint && npm run format:check",
+    "fix": "npm run lint:fix && npm run format",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",

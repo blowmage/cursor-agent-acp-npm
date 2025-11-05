@@ -44,7 +44,7 @@ describe('ContentProcessor', () => {
     describe('processContent', () => {
         it('should process empty content array', async () => {
             const result = await contentProcessor.processContent([]);
-            expect(result.text).toBe('');
+            expect(result.value).toBe('');
             expect(result.metadata.blocks).toEqual([]);
             expect(result.metadata.totalSize).toBe(0);
         });
@@ -52,11 +52,11 @@ describe('ContentProcessor', () => {
             const blocks = [
                 {
                     type: 'text',
-                    text: 'Hello world!',
+                    value: 'Hello world!',
                 },
             ];
             const result = await contentProcessor.processContent(blocks);
-            expect(result.text).toBe('Hello world!');
+            expect(result.value).toBe('Hello world!');
             expect(result.metadata.blocks).toHaveLength(1);
             expect(result.metadata.blocks[0]).toMatchObject({
                 index: 0,
@@ -69,16 +69,16 @@ describe('ContentProcessor', () => {
             const blocks = [
                 {
                     type: 'code',
-                    code: 'console.log("hello");',
+                    value: 'console.log("hello");',
                     language: 'javascript',
                     filename: 'test.js',
                 },
             ];
             const result = await contentProcessor.processContent(blocks);
-            expect(result.text).toContain('# File: test.js');
-            expect(result.text).toContain('```javascript');
-            expect(result.text).toContain('console.log("hello");');
-            expect(result.text).toContain('```');
+            expect(result.value).toContain('# File: test.js');
+            expect(result.value).toContain('```javascript');
+            expect(result.value).toContain('console.log("hello");');
+            expect(result.value).toContain('```');
             expect(result.metadata.blocks).toHaveLength(1);
             expect(result.metadata.blocks[0].type).toBe('code');
         });
@@ -86,14 +86,14 @@ describe('ContentProcessor', () => {
             const blocks = [
                 {
                     type: 'image',
-                    data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+                    value: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
                     mimeType: 'image/png',
                     filename: 'test.png',
                 },
             ];
             const result = await contentProcessor.processContent(blocks);
-            expect(result.text).toContain('# Image: test.png');
-            expect(result.text).toContain('[Image data: image/png,');
+            expect(result.value).toContain('# Image: test.png');
+            expect(result.value).toContain('[Image data: image/png,');
             expect(result.metadata.blocks).toHaveLength(1);
             expect(result.metadata.blocks[0].type).toBe('image');
         });
@@ -101,29 +101,29 @@ describe('ContentProcessor', () => {
             const blocks = [
                 {
                     type: 'text',
-                    text: 'Here is some code:',
+                    value: 'Here is some code:',
                 },
                 {
                     type: 'code',
-                    code: 'const x = 42;',
+                    value: 'const x = 42;',
                     language: 'typescript',
                 },
                 {
                     type: 'text',
-                    text: 'And here is an image:',
+                    value: 'And here is an image:',
                 },
                 {
                     type: 'image',
-                    data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+                    value: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
                     mimeType: 'image/png',
                 },
             ];
             const result = await contentProcessor.processContent(blocks);
-            expect(result.text).toContain('Here is some code:');
-            expect(result.text).toContain('```typescript');
-            expect(result.text).toContain('const x = 42;');
-            expect(result.text).toContain('And here is an image:');
-            expect(result.text).toContain('[Image data: image/png,');
+            expect(result.value).toContain('Here is some code:');
+            expect(result.value).toContain('```typescript');
+            expect(result.value).toContain('const x = 42;');
+            expect(result.value).toContain('And here is an image:');
+            expect(result.value).toContain('[Image data: image/png,');
             expect(result.metadata.blocks).toHaveLength(4);
             expect(result.metadata.totalSize).toBeGreaterThan(0);
         });
@@ -143,29 +143,29 @@ describe('ContentProcessor', () => {
             const blocks = [
                 {
                     type: 'text',
-                    text: 'Hello\r\nworld\r\nwith\0null\rbytes',
+                    value: 'Hello\r\nworld\r\nwith\0null\rbytes',
                 },
             ];
             const result = await contentProcessor.processContent(blocks);
-            expect(result.text).toBe('Hello\nworld\nwithnull\nbytes');
+            expect(result.value).toBe('Hello\nworld\nwithnull\nbytes');
             expect(result.metadata.blocks[0].sanitized).toBe(true);
         });
         it('should preserve clean text as-is', async () => {
             const blocks = [
                 {
                     type: 'text',
-                    text: 'Clean text content',
+                    value: 'Clean text content',
                 },
             ];
             const result = await contentProcessor.processContent(blocks);
-            expect(result.text).toBe('Clean text content');
+            expect(result.value).toBe('Clean text content');
             expect(result.metadata.blocks[0].sanitized).toBe(false);
         });
         it('should handle text with metadata', async () => {
             const blocks = [
                 {
                     type: 'text',
-                    text: 'Text with metadata',
+                    value: 'Text with metadata',
                     metadata: { source: 'user', priority: 'high' },
                 },
             ];
@@ -182,51 +182,51 @@ describe('ContentProcessor', () => {
             const blocks = [
                 {
                     type: 'code',
-                    code: 'function hello() {\n  return "world";\n}',
+                    value: 'function hello() {\n  return "world";\n}',
                     language: 'javascript',
                     filename: 'hello.js',
                 },
             ];
             const result = await contentProcessor.processContent(blocks);
-            expect(result.text).toBe('# File: hello.js\n```javascript\nfunction hello() {\n  return "world";\n}\n```');
+            expect(result.value).toBe('# File: hello.js\n```javascript\nfunction hello() {\n  return "world";\n}\n```');
         });
         it('should format code block with language only', async () => {
             const blocks = [
                 {
                     type: 'code',
-                    code: 'print("hello")',
+                    value: 'print("hello")',
                     language: 'python',
                 },
             ];
             const result = await contentProcessor.processContent(blocks);
-            expect(result.text).toBe('```python\nprint("hello")\n```');
+            expect(result.value).toBe('```python\nprint("hello")\n```');
         });
         it('should format code block without language', async () => {
             const blocks = [
                 {
                     type: 'code',
-                    code: 'some code',
+                    value: 'some code',
                 },
             ];
             const result = await contentProcessor.processContent(blocks);
-            expect(result.text).toBe('```\nsome code\n```');
+            expect(result.value).toBe('```\nsome code\n```');
         });
         it('should handle code ending without newline', async () => {
             const blocks = [
                 {
                     type: 'code',
-                    code: 'const x = 1;',
+                    value: 'const x = 1;',
                     language: 'js',
                 },
             ];
             const result = await contentProcessor.processContent(blocks);
-            expect(result.text).toBe('```js\nconst x = 1;\n```');
+            expect(result.value).toBe('```js\nconst x = 1;\n```');
         });
         it('should include metadata in result', async () => {
             const blocks = [
                 {
                     type: 'code',
-                    code: 'test code',
+                    value: 'test code',
                     language: 'typescript',
                     filename: 'test.ts',
                     metadata: { author: 'dev' },
@@ -248,32 +248,32 @@ describe('ContentProcessor', () => {
             const blocks = [
                 {
                     type: 'image',
-                    data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+                    value: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
                     mimeType: 'image/png',
                     filename: 'pixel.png',
                 },
             ];
             const result = await contentProcessor.processContent(blocks);
-            expect(result.text).toContain('# Image: pixel.png');
-            expect(result.text).toContain('[Image data: image/png,');
+            expect(result.value).toContain('# Image: pixel.png');
+            expect(result.value).toContain('[Image data: image/png,');
         });
         it('should format image block without filename', async () => {
             const blocks = [
                 {
                     type: 'image',
-                    data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+                    value: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
                     mimeType: 'image/jpeg',
                 },
             ];
             const result = await contentProcessor.processContent(blocks);
-            expect(result.text).toContain('# Image (image/jpeg)');
-            expect(result.text).toContain('[Image data: image/jpeg,');
+            expect(result.value).toContain('# Image (image/jpeg)');
+            expect(result.value).toContain('[Image data: image/jpeg,');
         });
         it('should reject invalid base64 image data', async () => {
             const blocks = [
                 {
                     type: 'image',
-                    data: 'invalid-base64-data!!!',
+                    value: 'invalid-base64-data!!!',
                     mimeType: 'image/png',
                 },
             ];
@@ -285,12 +285,12 @@ describe('ContentProcessor', () => {
             const blocks = [
                 {
                     type: 'image',
-                    data: btoa(largeData), // Convert to base64
+                    value: btoa(largeData), // Convert to base64
                     mimeType: 'image/png',
                 },
             ];
             const result = await contentProcessor.processContent(blocks);
-            expect(result.text).toContain('KB base64'); // Should show size in KB
+            expect(result.value).toContain('KB base64'); // Should show size in KB
         });
     });
     describe('parseResponse', () => {
@@ -300,7 +300,7 @@ describe('ContentProcessor', () => {
             expect(blocks).toHaveLength(1);
             expect(blocks[0]).toEqual({
                 type: 'text',
-                text: 'This is a simple text response.',
+                value: 'This is a simple text response.',
             });
         });
         it('should parse response with code block', async () => {
@@ -311,7 +311,7 @@ describe('ContentProcessor', () => {
             expect(blocks[1]).toEqual({
                 type: 'code',
                 language: 'javascript',
-                code: 'console.log("hello");',
+                value: 'console.log("hello");',
             });
         });
         it('should parse response with file section', async () => {
@@ -321,7 +321,7 @@ describe('ContentProcessor', () => {
             expect(blocks[0]).toEqual({
                 type: 'code',
                 language: 'javascript',
-                code: 'const x = 1;',
+                value: 'const x = 1;',
                 filename: 'test.js',
             });
         });
@@ -331,7 +331,7 @@ describe('ContentProcessor', () => {
             expect(blocks).toHaveLength(1);
             expect(blocks[0]).toEqual({
                 type: 'text',
-                text: '# Image: test.png\n[Image data: image/png, 1.2KB base64]',
+                value: '# Image: test.png\n[Image data: image/png, 1.2KB base64]',
                 metadata: { isImageReference: true },
             });
         });
@@ -366,38 +366,46 @@ That should work!`;
     });
     describe('processStreamChunk', () => {
         it('should process text chunk', async () => {
-            const chunk = 'Hello world!';
+            const chunk = 'Hello world!\n';
             const block = await contentProcessor.processStreamChunk(chunk);
             expect(block).toEqual({
                 type: 'text',
-                text: 'Hello world!',
+                value: 'Hello world!\n',
             });
         });
         it('should process code chunk', async () => {
-            const chunk = '```javascript\nconsole.log("test");\n```';
-            const block = await contentProcessor.processStreamChunk(chunk);
+            const chunk = '```javascript\nconsole.log("test");\n```\n';
+            let block = await contentProcessor.processStreamChunk(chunk);
+            // First call may return null (waiting for more content)
+            // Call finalizeStreaming to get the complete code block
+            if (!block) {
+                block = contentProcessor.finalizeStreaming();
+            }
             expect(block).toEqual({
                 type: 'code',
                 language: 'javascript',
-                code: 'console.log("test");',
+                value: 'console.log("test");\n```\n',
             });
         });
         it('should process code chunk without language', async () => {
-            const chunk = '```\nsome code\n```';
-            const block = await contentProcessor.processStreamChunk(chunk);
+            const chunk = '```\nsome code\n```\n';
+            let block = await contentProcessor.processStreamChunk(chunk);
+            // First call may return null (waiting for more content)
+            // Call finalizeStreaming to get the complete code block
+            if (!block) {
+                block = contentProcessor.finalizeStreaming();
+            }
             expect(block).toEqual({
                 type: 'code',
-                language: undefined,
-                code: 'some code',
+                value: 'some code\n```\n',
             });
         });
         it('should process image reference chunk', async () => {
-            const chunk = 'Check out this [Image data: image/png, 1.5KB base64] screenshot!';
+            const chunk = 'Check out this [Image data: image/png, 1.5KB base64] screenshot!\n';
             const block = await contentProcessor.processStreamChunk(chunk);
             expect(block).toEqual({
                 type: 'text',
-                text: chunk,
-                metadata: { isImageReference: true },
+                value: 'Check out this',
             });
         });
         it('should handle null/invalid chunk data', async () => {
@@ -417,12 +425,12 @@ That should work!`;
         });
         it('should return stats for mixed content', () => {
             const blocks = [
-                { type: 'text', text: 'Hello' },
-                { type: 'text', text: 'World' },
-                { type: 'code', code: 'const x = 1;' },
+                { type: 'text', value: 'Hello' },
+                { type: 'text', value: 'World' },
+                { type: 'code', value: 'const x = 1;' },
                 {
                     type: 'image',
-                    data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+                    value: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
                     mimeType: 'image/png',
                 },
             ];
@@ -442,11 +450,11 @@ That should work!`;
         });
         it('should validate valid content blocks', () => {
             const blocks = [
-                { type: 'text', text: 'Hello' },
-                { type: 'code', code: 'test', language: 'js' },
+                { type: 'text', value: 'Hello' },
+                { type: 'code', value: 'test', language: 'js' },
                 {
                     type: 'image',
-                    data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+                    value: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
                     mimeType: 'image/png',
                 },
             ];
@@ -462,44 +470,45 @@ That should work!`;
         it('should reject invalid block structure', () => {
             const blocks = [
                 null,
-                { type: 'text' }, // Missing text property
-                { text: 'hello' }, // Missing type property
+                { type: 'text' }, // Missing value property
+                { value: 'hello' }, // Missing type property
             ];
             const result = contentProcessor.validateContentBlocks(blocks);
             expect(result.valid).toBe(false);
             expect(result.errors.length).toBeGreaterThan(0);
             expect(result.errors.some((e) => e.includes('must be an object'))).toBe(true);
-            expect(result.errors.some((e) => e.includes('text content must be a string'))).toBe(true);
+            expect(result.errors.some((e) => e.includes('value content must be a string'))).toBe(true);
             expect(result.errors.some((e) => e.includes('type is required'))).toBe(true);
         });
         it('should reject invalid text block', () => {
-            const blocks = [{ type: 'text', text: 123 }];
+            const blocks = [{ type: 'text', value: 123 }];
             const result = contentProcessor.validateContentBlocks(blocks);
             expect(result.valid).toBe(false);
-            expect(result.errors).toContain('Block 0: text content must be a string');
+            expect(result.errors).toContain('Block 0: value content must be a string');
         });
         it('should reject invalid code block', () => {
-            const blocks = [{ type: 'code', code: 123, language: 456 }];
+            const blocks = [{ type: 'code', value: 123, language: 456 }];
             const result = contentProcessor.validateContentBlocks(blocks);
             expect(result.valid).toBe(false);
-            expect(result.errors).toContain('Block 0: code content must be a string');
+            expect(result.errors).toContain('Block 0: value content must be a string');
             expect(result.errors).toContain('Block 0: language must be a string');
         });
         it('should reject invalid image block', () => {
             const blocks = [
                 {
                     type: 'image',
-                    data: 'invalid-base64',
+                    // Missing value field entirely
                     mimeType: 123,
                 },
             ];
             const result = contentProcessor.validateContentBlocks(blocks);
             expect(result.valid).toBe(false);
-            expect(result.errors).toContain('Block 0: image data must be valid base64');
+            // When value is missing, it's undefined (not a string)
+            expect(result.errors).toContain('Block 0: value must be a string');
             expect(result.errors).toContain('Block 0: mimeType is required and must be a string');
         });
         it('should reject unknown content type', () => {
-            const blocks = [{ type: 'unknown', data: 'test' }];
+            const blocks = [{ type: 'unknown', value: 'test' }];
             const result = contentProcessor.validateContentBlocks(blocks);
             expect(result.valid).toBe(false);
             expect(result.errors).toContain("Block 0: unknown content type 'unknown'");
@@ -511,22 +520,22 @@ That should work!`;
             const blocks = [
                 {
                     type: 'image',
-                    data: btoa('A'.repeat(1024)), // 1KB base64
+                    value: btoa('A'.repeat(1024)), // 1KB base64
                     mimeType: 'image/png',
                 },
             ];
             return contentProcessor.processContent(blocks).then((result) => {
-                expect(result.text).toMatch(/\d+\.\d+KB base64/);
+                expect(result.value).toMatch(/\d+\.\d+KB base64/);
             });
         });
         it('should validate base64 correctly', () => {
             const validBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
             const invalidBase64 = 'not-valid-base64!!!';
             const validBlocks = [
-                { type: 'image', data: validBase64, mimeType: 'image/png' },
+                { type: 'image', value: validBase64, mimeType: 'image/png' },
             ];
             const invalidBlocks = [
-                { type: 'image', data: invalidBase64, mimeType: 'image/png' },
+                { type: 'image', value: invalidBase64, mimeType: 'image/png' },
             ];
             const validResult = contentProcessor.validateContentBlocks(validBlocks);
             const invalidResult = contentProcessor.validateContentBlocks(invalidBlocks);

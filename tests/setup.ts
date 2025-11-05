@@ -224,5 +224,5 @@ export const TEST_CONSTANTS = {
   SAMPLE_TEXT_CONTENT: 'This is sample text content for testing',
   SAMPLE_CODE_CONTENT: 'console.log("Hello, world!");',
 
-  ACP_PROTOCOL_VERSION: '0.1.0',
+  ACP_PROTOCOL_VERSION: 1, // Per ACP spec: protocol versions are integers
 } as const;

@@ -321,30 +321,71 @@ export interface ConnectivityTestResult {
 // ACP Method Types
 // ============================================================================
 
+// Per ACP spec: https://agentclientprotocol.com/protocol/initialization
 export interface InitializeParams {
-  protocolVersion: string | number; // Accept both string and number for compatibility
+  protocolVersion: number; // REQUIRED per ACP spec: protocol versions are integers (1, 2, etc.)
+  clientCapabilities?: ClientCapabilities; // OPTIONAL but SHOULD be provided per ACP spec
   clientInfo?: {
-    name: string;
-    version: string;
+    // OPTIONAL but SHOULD be provided per ACP spec
+    name: string; // REQUIRED if clientInfo provided
+    title?: string; // OPTIONAL: human-readable display name
+    version: string; // REQUIRED if clientInfo provided
   };
 }
 
 export interface InitializeResult {
-  protocolVersion: string;
-  serverInfo: {
+  protocolVersion: number; // ACP spec: must match or negotiate down from client's version
+  agentCapabilities: AgentCapabilities; // ACP spec: use "agentCapabilities" not "capabilities"
+  agentInfo: {
+    // ACP spec: use "agentInfo" not "serverInfo" (this is an Agent)
+    // Required (will be required in future protocol versions)
     name: string;
+    title?: string; // Optional: human-readable display name
     version: string;
   };
-  capabilities: ServerCapabilities;
+  authMethods: string[]; // ACP spec: array of supported auth methods (empty if none)
 }
 
-export interface ServerCapabilities {
-  sessionManagement: boolean;
-  streaming: boolean;
-  toolCalling: boolean;
-  fileSystem: boolean;
-  terminal: boolean;
-  contentTypes: string[];
+// Per ACP spec: Client capabilities
+export interface ClientCapabilities {
+  fs?: {
+    readTextFile?: boolean; // fs/read_text_file method available
+    writeTextFile?: boolean; // fs/write_text_file method available
+  };
+  terminal?: boolean; // All terminal/* methods available
+  _meta?: Record<string, any>; // Custom capability extensions
+}
+
+// Per ACP spec: Agent capabilities
+export interface AgentCapabilities {
+  loadSession?: boolean; // session/load method available (default: false)
+  promptCapabilities?: PromptCapabilities;
+  mcp?: McpCapabilities;
+  _meta?: Record<string, any>; // Custom capability extensions
+}
+
+// Per ACP spec: Prompt content capabilities
+export interface PromptCapabilities {
+  image?: boolean; // ContentBlock::Image supported (default: false)
+  audio?: boolean; // ContentBlock::Audio supported (default: false)
+  embeddedContext?: boolean; // ContentBlock::Resource supported (default: false)
+}
+
+// Per ACP spec: MCP server connection capabilities
+export interface McpCapabilities {
+  http?: boolean; // Connect to MCP servers over HTTP (default: false)
+  sse?: boolean; // Connect to MCP servers over SSE (default: false, deprecated)
+}
+
+// Legacy type for backward compatibility
+export interface ServerCapabilities extends AgentCapabilities {
+  // Deprecated fields for backward compatibility
+  sessionManagement?: boolean;
+  streaming?: boolean;
+  toolCalling?: boolean;
+  fileSystem?: boolean;
+  terminal?: boolean;
+  contentTypes?: string[];
 }
 
 export interface SessionNewParams {

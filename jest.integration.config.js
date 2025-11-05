@@ -12,17 +12,17 @@ module.exports = {
   setupFiles: ['<rootDir>/tests/integration/env.ts'],
   setupFilesAfterEnv: ['<rootDir>/tests/integration/setup.ts'],
   globalTeardown: '<rootDir>/tests/integration/teardown.ts',
-  testSequencer: '<rootDir>/tests/integration/sequencer.js',
+  // testSequencer: '<rootDir>/tests/integration/sequencer.js', // Disabled - not needed with maxWorkers: 1
 
   transform: {
     '^.+\\.tsx?$': ['ts-jest', { tsconfig: 'tsconfig.json' }],
   },
 
-  testTimeout: 10000, // Reduced from 70s to 10s - tests should be much faster with mocks
-  maxWorkers: 1, // Use 1 worker for more stable test execution
+  testTimeout: 10000,
+  maxWorkers: 1,
   clearMocks: true,
   restoreMocks: true,
   errorOnDeprecated: true,
-  forceExit: true,
   detectOpenHandles: true,
+  verbose: true,
 };

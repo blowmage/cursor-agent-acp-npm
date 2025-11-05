@@ -41,9 +41,26 @@ describe('Tool System Security', () => {
 
   afterAll(async () => {
     try {
+      // Cleanup tool registry to kill any spawned processes
+      if (registry) {
+        await registry.cleanup();
+      }
       await fs.rm(tempDir, { recursive: true, force: true });
     } catch (error) {
       console.warn('Failed to cleanup temp directory:', error);
+    }
+  });
+
+  afterEach(async () => {
+    // Cleanup any spawned processes after each test
+    if (registry) {
+      try {
+        await registry.cleanup();
+        // Give substantial time for all processes to terminate
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      } catch (error) {
+        console.warn('Failed to cleanup registry:', error);
+      }
     }
   });
 

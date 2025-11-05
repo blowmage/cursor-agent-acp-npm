@@ -126,7 +126,7 @@ describe('CursorAgentAdapter Integration', () => {
           method: 'initialize',
           id: 'test-init-1',
           params: {
-            protocolVersion: '0.1.0',
+            protocolVersion: 1, // Per ACP spec: must be integer
             clientInfo: {
               name: 'TestClient',
               version: '1.0.0',
@@ -139,19 +139,20 @@ describe('CursorAgentAdapter Integration', () => {
         expect(response.jsonrpc).toBe('2.0');
         expect(response.id).toBe('test-init-1');
         expect(response.result).toBeDefined();
-        expect(response.result.protocolVersion).toBe('0.1.0');
-        expect(response.result.serverInfo).toEqual({
+        expect(response.result.protocolVersion).toBe(1);
+        expect(response.result.agentInfo).toEqual({
           name: 'cursor-agent-acp',
-          version: '0.1.0',
+          title: 'Cursor Agent ACP Adapter',
+          version: expect.any(String), // Dynamic from package.json
         });
-        expect(response.result.capabilities).toEqual({
-          sessionManagement: true,
-          streaming: true,
-          toolCalling: true,
-          fileSystem: true,
-          terminal: true,
-          contentTypes: ['text', 'code', 'image'],
-        });
+        // Per ACP spec: check agentCapabilities structure
+        expect(response.result.agentCapabilities).toBeDefined();
+        expect(response.result.agentCapabilities.loadSession).toBe(true);
+        expect(
+          response.result.agentCapabilities.promptCapabilities
+        ).toBeDefined();
+        expect(response.result.agentCapabilities.mcp).toBeDefined();
+        expect(response.result.authMethods).toEqual([]);
       });
 
       it('should reject invalid protocol version', async () => {
@@ -167,7 +168,9 @@ describe('CursorAgentAdapter Integration', () => {
         const response = await adapter.processRequest(request);
 
         expect(response.error).toBeDefined();
-        expect(response.error?.message).toContain('protocol version');
+        expect(response.error?.message).toContain(
+          'Protocol version must be an integer'
+        );
       });
     });
 
