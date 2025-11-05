@@ -210,7 +210,7 @@ export class ContentProcessor {
       default:
         // TypeScript knows this should be unreachable, but at runtime invalid blocks might arrive
         throw new ProtocolError(
-          `Unknown content block type: ${(block as { type: string }).type}`
+          `Unknown content block type: ${(block as any)?.type || 'unknown'}`
         );
     }
   }
