@@ -288,6 +288,7 @@ export class ContentProcessor {
         codeLength: block.value.length,
         hasLanguageHint: Boolean(block.language),
         hasFilename: Boolean(block.filename),
+        annotations: block.annotations,
         ...(block.metadata || {}),
       },
     };
