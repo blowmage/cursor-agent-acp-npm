@@ -41,10 +41,8 @@ describe('Tool System Security', () => {
 
   afterAll(async () => {
     try {
-      // Cleanup tool registry to kill any spawned processes
-      if (registry) {
-        await registry.cleanup();
-      }
+      // Remove temporary test directory
+      // Note: registry cleanup is handled by afterEach hook
       await fs.rm(tempDir, { recursive: true, force: true });
     } catch (error) {
       console.warn('Failed to cleanup temp directory:', error);
