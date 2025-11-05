@@ -743,12 +743,8 @@ export class CursorAgentAdapter {
       throw new ProtocolError('sessionId is required');
     }
 
-    if (!params.metadata) {
-      throw new ProtocolError('metadata is required for session/update');
-    }
-
-    await this.sessionManager.updateSession(params.sessionId, params.metadata);
-
+    // metadata is optional; default to empty object for backward compatibility
+    await this.sessionManager.updateSession(params.sessionId, params.metadata || {});
     return {
       jsonrpc: '2.0',
       id: request.id,
