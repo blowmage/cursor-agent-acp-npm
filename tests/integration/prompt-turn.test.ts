@@ -372,7 +372,7 @@ describe('Prompt Turn Integration Tests', () => {
         sessionId
       );
 
-      expect(sessionData.conversation.length).toBeGreaterThanOrEqual(4); // 2 user + 2 assistant messages
+      expect(sessionData.conversation.length).toBe(4); // 2 user + 2 assistant messages
       expect(
         sessionData.conversation.filter((m: any) => m.role === 'user').length
       ).toBe(2);
