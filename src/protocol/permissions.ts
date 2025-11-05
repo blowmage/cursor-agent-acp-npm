@@ -49,7 +49,7 @@ export class PermissionsHandler {
     params: RequestPermissionParams
   ): Promise<PermissionOutcome> {
     // Generate a unique request ID
-    const requestId = `perm_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const requestId = `perm_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
 
     this.logger.debug('Creating permission request', {
       requestId,
