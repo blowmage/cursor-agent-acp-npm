@@ -827,7 +827,14 @@ export class CursorAgentAdapter {
       };
     }
 
-    // For proper notifications (no id), do not return a response (notification)
+    // For proper notifications (no id), return a dummy response
+    // This won't be sent to the client because processStdioMessage/HTTP handler
+    // already checks isNotification() and skips sending responses for notifications
+    return {
+      jsonrpc: '2.0',
+      id: null,
+      result: null,
+    };
   }
 
   private async handleToolsList(request: AcpRequest): Promise<AcpResponse> {
