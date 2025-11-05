@@ -638,9 +638,11 @@ describe('Prompt Turn Integration Tests', () => {
         expect(response.result?.stopReason).toBeDefined();
       });
 
-      // Should take longer than a single request (queued, not parallel)
-      // Mock processes quickly, so this is a rough check
-      expect(totalTime).toBeGreaterThan(100);
+      // Check that prompts were processed sequentially (queued, not parallel)
+      // We verify this by checking the order in which the mock processed the prompts.
+      // The mock should record the order of prompt IDs it processed.
+      const mockBridge = (adapter as any).bridge as any;
+      expect(mockBridge.processedPromptIds).toEqual(['queue-1', 'queue-2', 'queue-3']);
     }, 30000);
 
     it('should process prompts to different sessions in parallel', async () => {
