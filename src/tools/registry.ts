@@ -18,12 +18,14 @@ import {
 import { FilesystemToolProvider } from './filesystem';
 import { TerminalToolProvider } from './terminal';
 import { CursorToolsProvider } from './cursor-tools';
+import type { ToolCallManager } from './tool-call-manager';
 
 export class ToolRegistry {
   private config: AdapterConfig;
   private logger: Logger;
   private providers = new Map<string, ToolProvider>();
   private tools = new Map<string, Tool>();
+  private toolCallManager?: ToolCallManager;
 
   constructor(config: AdapterConfig, logger: Logger) {
     this.config = config;
@@ -33,6 +35,14 @@ export class ToolRegistry {
 
     // Initialize built-in tool providers
     this.initializeProviders();
+  }
+
+  /**
+   * Set the tool call manager for reporting tool execution
+   */
+  setToolCallManager(manager: ToolCallManager): void {
+    this.toolCallManager = manager;
+    this.logger.debug('ToolCallManager registered with ToolRegistry');
   }
 
   /**
@@ -102,15 +112,32 @@ export class ToolRegistry {
   }
 
   /**
-   * Executes a tool call
+   * Executes a tool call (legacy method without sessionId)
    */
   async executeTool(toolCall: ToolCall): Promise<ToolResult> {
+    // Call the new method with undefined sessionId (no tool call reporting)
+    return this.executeToolWithSession(toolCall, undefined);
+  }
+
+  /**
+   * Executes a tool call with session context and tool call reporting
+   * Per ACP spec: Reports tool execution via session/update notifications
+   */
+  async executeToolWithSession(
+    toolCall: ToolCall,
+    sessionId?: string
+  ): Promise<ToolResult> {
     this.logger.debug(`Executing tool: ${toolCall.name}`, {
       id: toolCall.id,
       parameters: toolCall.parameters,
+      sessionId,
     });
 
     const startTime = Date.now();
+
+    // Report tool call if we have a session and tool call manager
+    let toolCallId: string | undefined;
+    const shouldReportToolCalls = sessionId && this.toolCallManager;
 
     try {
       const tool = this.tools.get(toolCall.name);
@@ -145,11 +172,40 @@ export class ToolRegistry {
         };
       }
 
+      // Report tool call start
+      if (shouldReportToolCalls) {
+        const toolKind = this.getToolKind(toolCall.name);
+        toolCallId = await this.toolCallManager!.reportToolCall(
+          sessionId!,
+          toolCall.name,
+          {
+            title: this.getToolTitle(toolCall.name, toolCall.parameters),
+            kind: toolKind,
+            status: 'in_progress',
+            rawInput: toolCall.parameters,
+          }
+        );
+      }
+
       // Execute the tool
       const result = await tool.handler(toolCall.parameters);
 
       const duration = Date.now() - startTime;
       this.logger.debug(`Tool executed in ${duration}ms: ${toolCall.name}`);
+
+      // Report tool call completion
+      if (shouldReportToolCalls && toolCallId) {
+        if (result.success) {
+          await this.toolCallManager!.completeToolCall(sessionId!, toolCallId, {
+            rawOutput: result.result,
+          });
+        } else {
+          await this.toolCallManager!.failToolCall(sessionId!, toolCallId, {
+            error: result.error || 'Unknown error',
+            rawOutput: result.result,
+          });
+        }
+      }
 
       return {
         ...result,
@@ -158,6 +214,7 @@ export class ToolRegistry {
           toolName: toolCall.name,
           duration,
           executedAt: new Date(),
+          ...(toolCallId && { toolCallId }),
         },
       };
     } catch (error) {
@@ -174,6 +231,13 @@ export class ToolRegistry {
             ? error.message
             : String(error);
 
+      // Report tool call failure
+      if (shouldReportToolCalls && toolCallId) {
+        await this.toolCallManager!.failToolCall(sessionId!, toolCallId, {
+          error: errorMessage,
+        });
+      }
+
       return {
         success: false,
         error: errorMessage,
@@ -181,8 +245,80 @@ export class ToolRegistry {
           toolName: toolCall.name,
           duration,
           executedAt: new Date(),
+          ...(toolCallId && { toolCallId }),
         },
       };
+    }
+  }
+
+  /**
+   * Get the ACP tool kind for a tool name
+   */
+  private getToolKind(toolName: string): import('../types').ToolKind {
+    // Map tool names to ACP tool kinds
+    const kindMap: Record<string, import('../types').ToolKind> = {
+      // Filesystem tools
+      read_file: 'read',
+      write_file: 'edit',
+      list_directory: 'read',
+      delete_file: 'delete',
+      move_file: 'move',
+      copy_file: 'read',
+      create_directory: 'edit',
+
+      // Terminal tools
+      execute_command: 'execute',
+      start_shell_session: 'execute',
+      send_to_shell: 'execute',
+      kill_shell_session: 'execute',
+
+      // Cursor tools
+      search_codebase: 'search',
+      analyze_code: 'read',
+      apply_code_changes: 'edit',
+      run_tests: 'execute',
+      get_project_info: 'read',
+      explain_code: 'read',
+    };
+
+    return kindMap[toolName] || 'other';
+  }
+
+  /**
+   * Generate a human-readable title for a tool call
+   */
+  private getToolTitle(
+    toolName: string,
+    parameters: Record<string, any>
+  ): string {
+    // Create descriptive titles based on tool and parameters
+    switch (toolName) {
+      case 'read_file':
+        return `Reading file: ${parameters['path'] || 'unknown'}`;
+      case 'write_file':
+        return `Writing file: ${parameters['path'] || 'unknown'}`;
+      case 'list_directory':
+        return `Listing directory: ${parameters['path'] || 'unknown'}`;
+      case 'delete_file':
+        return `Deleting file: ${parameters['path'] || 'unknown'}`;
+      case 'move_file':
+        return `Moving file: ${parameters['source'] || 'unknown'} → ${parameters['destination'] || 'unknown'}`;
+      case 'execute_command':
+        return `Executing: ${parameters['command'] || 'unknown command'}`;
+      case 'search_codebase':
+        return `Searching codebase: ${parameters['query'] || 'unknown'}`;
+      case 'analyze_code':
+        return `Analyzing: ${parameters['file_path'] || 'unknown'}`;
+      case 'apply_code_changes':
+        return `Applying ${Array.isArray(parameters['changes']) ? parameters['changes'].length : 0} code changes`;
+      case 'run_tests':
+        return `Running tests: ${parameters['test_pattern'] || 'all'}`;
+      case 'get_project_info':
+        return 'Getting project information';
+      case 'explain_code':
+        return `Explaining code: ${parameters['file_path'] || 'unknown'}`;
+      default:
+        return `Executing tool: ${toolName}`;
     }
   }
 

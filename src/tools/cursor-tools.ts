@@ -337,6 +337,14 @@ export class CursorToolsProvider implements ToolProvider {
         includeContext
       );
 
+      // Extract locations from search results for tool call reporting
+      const locations: Array<{ path: string; line?: number }> = searchResults
+        .map((r) => ({
+          path: path.resolve(r.file),
+          line: r.line,
+        }))
+        .slice(0, 10); // Limit to first 10 locations
+
       return {
         success: true,
         result: {
@@ -349,6 +357,7 @@ export class CursorToolsProvider implements ToolProvider {
           searchTime: result.metadata?.['executionTime'] || 0,
           filePattern,
           caseSensitive,
+          locations, // Include locations for tool call reporting
         },
       };
     } catch (error) {
@@ -409,6 +418,13 @@ export class CursorToolsProvider implements ToolProvider {
       // Parse analysis results
       const analysis = this.parseAnalysisResults(result.stdout);
 
+      // Include file location for tool call reporting
+      const locations: Array<{ path: string; line?: number }> = [
+        {
+          path: resolvedPath,
+        },
+      ];
+
       return {
         success: true,
         result: {
@@ -419,6 +435,7 @@ export class CursorToolsProvider implements ToolProvider {
         metadata: {
           analysisTime: result.metadata?.['executionTime'] || 0,
           includeMetrics,
+          locations, // Include location for tool call reporting
         },
       };
     } catch (error) {
@@ -470,6 +487,43 @@ export class CursorToolsProvider implements ToolProvider {
         );
       }
 
+      // Read old file contents to create diffs
+      const fs = await import('fs/promises');
+      const diffs: Array<{
+        type: 'diff';
+        path: string;
+        oldText: string | null;
+        newText: string;
+      }> = [];
+
+      for (const change of changes) {
+        const resolvedPath = path.resolve(change.file);
+        let oldText: string | null = null;
+
+        try {
+          // Try to read existing file
+          oldText = await fs.readFile(resolvedPath, 'utf-8');
+        } catch (error) {
+          // File doesn't exist - this is a new file
+          oldText = null;
+        }
+
+        diffs.push({
+          type: 'diff',
+          path: resolvedPath,
+          oldText,
+          newText: change.newContent,
+        });
+      }
+
+      // Extract locations from changes
+      const locations: Array<{ path: string; line?: number }> = changes.map(
+        (change) => ({
+          path: path.resolve(change.file),
+          line: change.startLine,
+        })
+      );
+
       // Build apply command
       const applyArgs = ['apply-changes'];
       if (dryRun) {
@@ -482,7 +536,6 @@ export class CursorToolsProvider implements ToolProvider {
       // Create temporary file with changes
       const changesJson = JSON.stringify(changes, null, 2);
       const tempFile = path.join(process.cwd(), '.cursor-changes.json');
-      const fs = await import('fs/promises');
       await fs.writeFile(tempFile, changesJson);
 
       try {
@@ -521,6 +574,8 @@ export class CursorToolsProvider implements ToolProvider {
             applyTime: result.metadata?.['executionTime'] || 0,
             dryRun,
             backup,
+            diffs, // Include diffs for tool call reporting
+            locations, // Include locations for tool call reporting
           },
         };
       } finally {
@@ -735,6 +790,14 @@ export class CursorToolsProvider implements ToolProvider {
       // Parse explanation
       const explanation = this.parseExplanation(result.stdout);
 
+      // Include file location for tool call reporting
+      const locations: Array<{ path: string; line?: number }> = [
+        {
+          path: path.resolve(filePath),
+          line: startLine,
+        },
+      ];
+
       return {
         success: true,
         result: {
@@ -746,6 +809,7 @@ export class CursorToolsProvider implements ToolProvider {
         },
         metadata: {
           explanationTime: result.metadata?.['executionTime'] || 0,
+          locations, // Include location for tool call reporting
         },
       };
     } catch (error) {

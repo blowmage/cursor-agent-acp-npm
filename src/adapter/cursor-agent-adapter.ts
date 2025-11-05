@@ -30,8 +30,10 @@ import { validateConfig } from '../utils/config';
 import { SessionManager } from '../session/manager';
 import { CursorCliBridge } from '../cursor/cli-bridge';
 import { ToolRegistry } from '../tools/registry';
+import { ToolCallManager } from '../tools/tool-call-manager';
 import { InitializationHandler } from '../protocol/initialization';
 import { PromptHandler } from '../protocol/prompt';
+import { PermissionsHandler } from '../protocol/permissions';
 
 export class CursorAgentAdapter {
   private config: AdapterConfig;
@@ -43,6 +45,8 @@ export class CursorAgentAdapter {
   private sessionManager?: SessionManager;
   private cursorBridge?: CursorCliBridge;
   private toolRegistry?: ToolRegistry;
+  private toolCallManager?: ToolCallManager;
+  private permissionsHandler?: PermissionsHandler;
   private initializationHandler?: InitializationHandler;
   private promptHandler?: PromptHandler;
 
@@ -231,6 +235,9 @@ export class CursorAgentAdapter {
         case 'session/cancel':
           return await this.handleSessionCancel(request);
 
+        case 'session/request_permission':
+          return await this.handleRequestPermission(request);
+
         case 'tools/list':
           return await this.handleToolsList(request);
 
@@ -279,12 +286,16 @@ export class CursorAgentAdapter {
         sessionManager: Boolean(this.sessionManager),
         cursorBridge: Boolean(this.cursorBridge),
         toolRegistry: Boolean(this.toolRegistry),
+        toolCallManager: Boolean(this.toolCallManager),
+        permissionsHandler: Boolean(this.permissionsHandler),
         initializationHandler: Boolean(this.initializationHandler),
         promptHandler: Boolean(this.promptHandler),
       },
       metrics: {
         sessions: this.sessionManager?.getMetrics() || {},
         tools: this.toolRegistry?.getMetrics() || {},
+        toolCalls: this.toolCallManager?.getMetrics() || {},
+        permissions: this.permissionsHandler?.getMetrics() || {},
       },
     };
 
@@ -304,8 +315,28 @@ export class CursorAgentAdapter {
     // Initialize CursorCliBridge
     this.cursorBridge = new CursorCliBridge(this.config, this.logger);
 
+    // Initialize PermissionsHandler
+    this.permissionsHandler = new PermissionsHandler({
+      logger: this.logger,
+    });
+
+    // Initialize ToolCallManager with permissions support
+    this.toolCallManager = new ToolCallManager({
+      logger: this.logger,
+      sendNotification: this.sendNotification.bind(this),
+      requestPermission: async (params) => {
+        if (!this.permissionsHandler) {
+          throw new ProtocolError('Permissions handler not initialized');
+        }
+        return this.permissionsHandler.createPermissionRequest(params);
+      },
+    });
+
     // Initialize ToolRegistry
     this.toolRegistry = new ToolRegistry(this.config, this.logger);
+
+    // Connect ToolCallManager to ToolRegistry
+    this.toolRegistry.setToolCallManager(this.toolCallManager);
 
     // Initialize protocol handlers
     this.initializationHandler = new InitializationHandler(
@@ -810,6 +841,16 @@ export class CursorAgentAdapter {
     // request with the 'cancelled' stop reason (handled in PromptHandler)
     await this.promptHandler.cancelSession(sessionId);
 
+    // Cancel all active tool calls for this session
+    if (this.toolCallManager) {
+      await this.toolCallManager.cancelSessionToolCalls(sessionId);
+    }
+
+    // Cancel all pending permission requests for this session
+    if (this.permissionsHandler) {
+      this.permissionsHandler.cancelSessionPermissionRequests(sessionId);
+    }
+
     // Per JSON-RPC 2.0 spec: Notifications do not receive responses
     // However, if the client incorrectly sent this as a request (with id),
     // we still need to return a response to avoid leaving the client hanging
@@ -868,13 +909,20 @@ export class CursorAgentAdapter {
       throw new ProtocolError('tool name is required');
     }
 
+    // Extract sessionId if provided (for tool call reporting)
+    const sessionId = params['sessionId'] || params['session_id'];
+
     const toolCall = {
       id: request.id.toString(),
       name: params.name,
       parameters: params.parameters || {},
     };
 
-    const result = await this.toolRegistry.executeTool(toolCall);
+    // Use executeToolWithSession for tool call reporting
+    const result = await this.toolRegistry.executeToolWithSession(
+      toolCall,
+      sessionId
+    );
 
     // If the tool execution failed, return an error response
     if (!result.success) {
@@ -904,12 +952,32 @@ export class CursorAgentAdapter {
     return request.id === null || request.id === undefined;
   }
 
+  private async handleRequestPermission(
+    request: AcpRequest
+  ): Promise<AcpResponse> {
+    if (!this.permissionsHandler) {
+      throw new ProtocolError('Permissions handler not available');
+    }
+
+    return await this.permissionsHandler.handlePermissionRequest(request);
+  }
+
   private async cleanup(): Promise<void> {
     this.logger.debug('Cleaning up adapter components');
 
     // Cleanup in reverse order of initialization
     if (this.promptHandler) {
       await this.promptHandler.cleanup();
+    }
+
+    // Cleanup permissions handler
+    if (this.permissionsHandler) {
+      await this.permissionsHandler.cleanup();
+    }
+
+    // Cleanup tool call manager
+    if (this.toolCallManager) {
+      await this.toolCallManager.cleanup();
     }
 
     // Cleanup tool registry (cleans up all tool providers)

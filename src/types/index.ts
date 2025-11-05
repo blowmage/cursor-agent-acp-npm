@@ -251,6 +251,109 @@ export interface ToolProvider {
 }
 
 // ============================================================================
+// ACP Tool Call Types (per ACP spec)
+// ============================================================================
+
+// Per ACP spec: Tool kinds for categorizing tool operations
+export type ToolKind =
+  | 'read' // Reading files or data
+  | 'edit' // Modifying files or content
+  | 'delete' // Removing files or data
+  | 'move' // Moving or renaming files
+  | 'search' // Searching for information
+  | 'execute' // Running commands or code
+  | 'think' // Internal reasoning or planning
+  | 'fetch' // Retrieving external data
+  | 'other'; // Other tool types (default)
+
+// Per ACP spec: Tool call execution status
+export type ToolCallStatus =
+  | 'pending' // Tool call hasn't started yet (awaiting input/approval)
+  | 'in_progress' // Tool call is currently running
+  | 'completed' // Tool call completed successfully
+  | 'failed'; // Tool call failed with an error
+
+// Per ACP spec: File location for tool calls
+export interface ToolCallLocation {
+  path: string; // Absolute file path
+  line?: number; // Optional line number within the file
+}
+
+// Per ACP spec: Diff content for file modifications
+export interface ToolCallDiffContent {
+  type: 'diff';
+  path: string; // Absolute file path being modified
+  oldText: string | null; // Original content (null for new files)
+  newText: string; // New content after modification
+}
+
+// Per ACP spec: Terminal output content
+export interface ToolCallTerminalContent {
+  type: 'terminal';
+  terminalId: string; // ID of a terminal created with terminal/create
+}
+
+// Per ACP spec: Regular content block wrapper
+export interface ToolCallRegularContent {
+  type: 'content';
+  content: ContentBlock; // Any standard content block (text, image, etc.)
+}
+
+// Per ACP spec: Tool call content types
+export type ToolCallContent =
+  | ToolCallRegularContent
+  | ToolCallDiffContent
+  | ToolCallTerminalContent;
+
+// Per ACP spec: Tool call update structure
+export interface ToolCallUpdate {
+  toolCallId: string; // Unique identifier for this tool call
+  title?: string; // Human-readable description of what the tool is doing
+  kind?: ToolKind; // Category of tool being invoked
+  status?: ToolCallStatus; // Current execution status
+  content?: ToolCallContent[]; // Content produced by the tool call
+  locations?: ToolCallLocation[]; // File locations affected by this tool call
+  rawInput?: Record<string, any>; // Raw input parameters sent to the tool
+  rawOutput?: Record<string, any>; // Raw output returned by the tool
+}
+
+// Per ACP spec: Permission option kinds
+export type PermissionOptionKind =
+  | 'allow_once' // Allow this operation only this time
+  | 'allow_always' // Allow this operation and remember the choice
+  | 'reject_once' // Reject this operation only this time
+  | 'reject_always'; // Reject this operation and remember the choice
+
+// Per ACP spec: Permission option
+export interface PermissionOption {
+  optionId: string; // Unique identifier for this option
+  name: string; // Human-readable label to display to the user
+  kind: PermissionOptionKind; // Hint for appropriate UI treatment
+}
+
+// Per ACP spec: Permission request outcome
+export type PermissionOutcome =
+  | {
+      outcome: 'cancelled'; // Prompt turn was cancelled
+    }
+  | {
+      outcome: 'selected'; // User selected an option
+      optionId: string; // The ID of the selected option
+    };
+
+// Per ACP spec: Permission request params
+export interface RequestPermissionParams {
+  sessionId: string; // The session ID for this request
+  toolCall: ToolCallUpdate; // The tool call details
+  options: PermissionOption[]; // Available permission options
+}
+
+// Per ACP spec: Permission request result
+export interface RequestPermissionResult {
+  outcome: PermissionOutcome; // The user's decision
+}
+
+// ============================================================================
 // Cursor CLI Types
 // ============================================================================
 

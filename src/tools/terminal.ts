@@ -316,6 +316,7 @@ export class TerminalToolProvider implements ToolProvider {
         },
         metadata: {
           createdAt: session.createdAt.toISOString(),
+          terminalId: sessionId, // For ACP terminal content type
         },
       };
     } catch (error) {
@@ -392,6 +393,7 @@ export class TerminalToolProvider implements ToolProvider {
         metadata: {
           timeout,
           outputLength: output.stdout.length,
+          terminalId: sessionId, // For ACP terminal content type
         },
       };
     } catch (error) {

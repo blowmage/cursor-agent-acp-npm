@@ -707,6 +707,18 @@ export class PromptHandler {
         // Per ACP spec: Resource link
         return typeof block.uri === 'string' && typeof block.name === 'string';
 
+      case 'diff':
+        // Per ACP spec: Diff content for file modifications
+        return (
+          typeof block.path === 'string' &&
+          (block.oldText === null || typeof block.oldText === 'string') &&
+          typeof block.newText === 'string'
+        );
+
+      case 'terminal':
+        // Per ACP spec: Terminal output content
+        return typeof block.terminalId === 'string';
+
       default:
         return false;
     }
