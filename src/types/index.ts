@@ -475,12 +475,9 @@ export interface SessionLoadParams {
   mcpServers: McpServerConfig[]; // Required: MCP servers to connect to
 }
 
-export interface SessionLoadResult {
-  // Per ACP spec: After streaming all conversation via session/update notifications,
-  // the session/load response should return null
-  // The type is kept for backward compatibility but will be null in compliant implementations
-  null: null;
-}
+// Per ACP spec: After streaming all conversation via session/update notifications,
+// the session/load response should return null
+export type SessionLoadResult = null;
 
 export interface SessionListParams {
   limit?: number;
