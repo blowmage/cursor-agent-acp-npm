@@ -519,8 +519,11 @@ export class CursorAgentAdapter {
     const params = (request.params as any) || {};
 
     // Per ACP spec: cwd is required
-    if (!params['cwd']) {
-      throw new ProtocolError('cwd (working directory) is required');
+    if (
+      typeof params['cwd'] !== 'string' ||
+      params['cwd'].trim() === ''
+    ) {
+      throw new ProtocolError('cwd (working directory) is required and must be a non-empty string');
     }
 
     // Per ACP spec: mcpServers is required (can be empty array)
