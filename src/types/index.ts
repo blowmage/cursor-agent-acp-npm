@@ -124,31 +124,84 @@ export interface SessionState {
 // Content Types
 // ============================================================================
 
+// Per ACP spec: Annotations for content blocks
+export interface Annotations {
+  audience?: ('user' | 'assistant')[];
+  priority?: number;
+  [key: string]: any; // Extensible for custom fields
+}
+
 export type ContentBlock =
   | TextContentBlock
   | CodeContentBlock
-  | ImageContentBlock;
+  | ImageContentBlock
+  | AudioContentBlock
+  | EmbeddedResourceContentBlock
+  | ResourceLinkContentBlock;
 
+// Per ACP spec: Text content uses 'text' field
 export interface TextContentBlock {
   type: 'text';
-  value: string;
-  metadata?: Record<string, any>;
+  text: string; // Per ACP spec: use 'text' not 'value'
+  value?: string; // Deprecated: for backward compatibility
+  annotations?: Annotations;
+  metadata?: Record<string, any>; // Deprecated: use annotations
 }
 
+// Custom extension: Code as separate type (not in ACP spec)
+// ACP spec recommends using text with annotations, but we keep this for convenience
 export interface CodeContentBlock {
   type: 'code';
-  value: string;
+  value: string; // Internal only
   language?: string;
   filename?: string;
-  metadata?: Record<string, any>;
+  annotations?: Annotations;
+  metadata?: Record<string, any>; // Deprecated: use annotations
 }
 
+// Per ACP spec: Image content uses 'data' field
 export interface ImageContentBlock {
   type: 'image';
-  value: string; // (base64 encoded)
+  data: string; // Per ACP spec: use 'data' not 'value' (base64 encoded)
+  value?: string; // Deprecated: for backward compatibility
   mimeType: string;
-  filename?: string;
-  metadata?: Record<string, any>;
+  uri?: string; // Optional: source URI
+  filename?: string; // Extension: not in spec
+  annotations?: Annotations;
+  metadata?: Record<string, any>; // Deprecated: use annotations
+}
+
+// Per ACP spec: Audio content
+export interface AudioContentBlock {
+  type: 'audio';
+  data: string; // Base64-encoded audio data
+  mimeType: string; // e.g., "audio/wav", "audio/mp3"
+  annotations?: Annotations;
+}
+
+// Per ACP spec: Embedded resource (preferred way to include context)
+export interface EmbeddedResourceContentBlock {
+  type: 'resource';
+  resource: {
+    uri: string;
+    mimeType?: string;
+  } & (
+    | { text: string } // Text resource
+    | { blob: string } // Binary resource (base64)
+  );
+  annotations?: Annotations;
+}
+
+// Per ACP spec: Resource link
+export interface ResourceLinkContentBlock {
+  type: 'resource_link';
+  uri: string;
+  name: string;
+  mimeType?: string;
+  title?: string;
+  description?: string;
+  size?: number;
+  annotations?: Annotations;
 }
 
 // ============================================================================

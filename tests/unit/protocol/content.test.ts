@@ -360,7 +360,7 @@ describe('ContentProcessor', () => {
       const blocks: ContentBlock[] = [
         {
           type: 'image',
-          value: btoa(largeData), // Convert to base64
+          data: btoa(largeData), // Convert to base64
           mimeType: 'image/png',
         },
       ];
@@ -380,7 +380,7 @@ describe('ContentProcessor', () => {
       expect(blocks).toHaveLength(1);
       expect(blocks[0]).toEqual({
         type: 'text',
-        value: 'This is a simple text response.',
+        text: 'This is a simple text response.',
       });
     });
 
@@ -422,7 +422,7 @@ describe('ContentProcessor', () => {
       expect(blocks).toHaveLength(1);
       expect(blocks[0]).toEqual({
         type: 'text',
-        value: '# Image: test.png\n[Image data: image/png, 1.2KB base64]',
+        text: '# Image: test.png\n[Image data: image/png, 1.2KB base64]',
         metadata: { isImageReference: true },
       });
     });
@@ -472,7 +472,7 @@ That should work!`;
 
       expect(block).toEqual({
         type: 'text',
-        value: 'Hello world!\n',
+        text: 'Hello world!\n',
       });
     });
 
@@ -517,7 +517,7 @@ That should work!`;
 
       expect(block).toEqual({
         type: 'text',
-        value: 'Check out this',
+        text: 'Check out this',
       });
     });
 
@@ -541,13 +541,12 @@ That should work!`;
 
     it('should return stats for mixed content', () => {
       const blocks: ContentBlock[] = [
-        { type: 'text', value: 'Hello' },
-        { type: 'text', value: 'World' },
+        { type: 'text', text: 'Hello' },
+        { type: 'text', text: 'World' },
         { type: 'code', value: 'const x = 1;' },
         {
           type: 'image',
-          value:
-            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+          data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
           mimeType: 'image/png',
         },
       ];
@@ -572,12 +571,11 @@ That should work!`;
 
     it('should validate valid content blocks', () => {
       const blocks: ContentBlock[] = [
-        { type: 'text', value: 'Hello' },
+        { type: 'text', text: 'Hello' },
         { type: 'code', value: 'test', language: 'js' },
         {
           type: 'image',
-          value:
-            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+          data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
           mimeType: 'image/png',
         },
       ];
@@ -609,9 +607,6 @@ That should work!`;
       expect(result.errors.some((e) => e.includes('must be an object'))).toBe(
         true
       );
-      expect(
-        result.errors.some((e) => e.includes('value content must be a string'))
-      ).toBe(true);
       expect(result.errors.some((e) => e.includes('type is required'))).toBe(
         true
       );
@@ -624,7 +619,7 @@ That should work!`;
 
       expect(result.valid).toBe(false);
       expect(result.errors).toContain(
-        'Block 0: value content must be a string'
+        `Block 0: text content must be a string (use 'text' field)`
       );
     });
 
@@ -652,8 +647,10 @@ That should work!`;
       const result = contentProcessor.validateContentBlocks(blocks as any);
 
       expect(result.valid).toBe(false);
-      // When value is missing, it's undefined (not a string)
-      expect(result.errors).toContain('Block 0: value must be a string');
+      // Per ACP spec: image uses 'data' field
+      expect(result.errors).toContain(
+        `Block 0: data must be a string (use 'data' field)`
+      );
       expect(result.errors).toContain(
         'Block 0: mimeType is required and must be a string'
       );
@@ -693,10 +690,10 @@ That should work!`;
       const invalidBase64 = 'not-valid-base64!!!';
 
       const validBlocks: ContentBlock[] = [
-        { type: 'image', value: validBase64, mimeType: 'image/png' },
+        { type: 'image', data: validBase64, mimeType: 'image/png' },
       ];
       const invalidBlocks: ContentBlock[] = [
-        { type: 'image', value: invalidBase64, mimeType: 'image/png' },
+        { type: 'image', data: invalidBase64, mimeType: 'image/png' },
       ];
 
       const validResult = contentProcessor.validateContentBlocks(validBlocks);

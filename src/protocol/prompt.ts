@@ -657,7 +657,8 @@ export class PromptHandler {
 
   /**
    * Check if content block is valid
-   * Accepts both old format (text/code/data) and new format (value)
+   * Per ACP spec: text uses 'text', image/audio use 'data'
+   * Maintains backward compatibility with 'value' field
    */
   private isValidContentBlock(block: any): block is ContentBlock {
     if (!block || typeof block !== 'object' || !block.type) {
@@ -666,21 +667,46 @@ export class PromptHandler {
 
     switch (block.type) {
       case 'text':
-        // Accept both 'text' (from Zed) and 'value' (ACP spec) fields
+        // Per ACP spec: uses 'text' field (or 'value' for backward compatibility)
         return (
           typeof block.text === 'string' || typeof block.value === 'string'
         );
+
       case 'code':
-        // Accept both 'code' (from Zed) and 'value' (ACP spec) fields
-        return (
-          typeof block.code === 'string' || typeof block.value === 'string'
-        );
+        // Internal type: uses 'value' field
+        return typeof block.value === 'string';
+
       case 'image':
-        // Accept both 'data' (from Zed) and 'value' (ACP spec) fields
+        // Per ACP spec: uses 'data' field (or 'value' for backward compatibility)
         return (
           (typeof block.data === 'string' || typeof block.value === 'string') &&
           typeof block.mimeType === 'string'
         );
+
+      case 'audio':
+        // Per ACP spec: Audio content
+        return (
+          typeof block.data === 'string' && typeof block.mimeType === 'string'
+        );
+
+      case 'resource':
+        // Per ACP spec: Embedded resource
+        if (!block.resource || typeof block.resource !== 'object') {
+          return false;
+        }
+        if (typeof block.resource.uri !== 'string') {
+          return false;
+        }
+        // Must have either text or blob
+        return (
+          typeof block.resource.text === 'string' ||
+          typeof block.resource.blob === 'string'
+        );
+
+      case 'resource_link':
+        // Per ACP spec: Resource link
+        return typeof block.uri === 'string' && typeof block.name === 'string';
+
       default:
         return false;
     }
@@ -696,30 +722,68 @@ export class PromptHandler {
   /**
    * Convert a ContentBlock to ACP ContentBlock format
    * Per ACP spec: single content block object (not array)
+   * Uses correct field names: text for text, data for binary
    */
   private convertContentBlockToAcp(block: ContentBlock): any {
     switch (block.type) {
       case 'text':
         return {
           type: 'text',
-          text: block.value,
+          text: block.text || block.value || '',
+          ...(block.annotations && { annotations: block.annotations }),
         };
-      case 'code':
+
+      case 'code': {
+        // Per ACP spec: Code is sent as text with language annotation
+        const codeAnnotations = {
+          ...(block.language && { language: block.language }),
+          ...(block.annotations || {}),
+        };
         return {
-          type: 'text', // Code is sent as text with language annotation
+          type: 'text',
           text: block.value,
-          annotations: block.language
-            ? {
-                language: block.language,
-              }
-            : undefined,
+          ...(Object.keys(codeAnnotations).length > 0 && {
+            annotations: codeAnnotations,
+          }),
         };
+      }
+
       case 'image':
         return {
           type: 'image',
-          data: block.value,
+          data: block.data || block.value || '',
           mimeType: block.mimeType,
+          ...(block.uri && { uri: block.uri }),
+          ...(block.annotations && { annotations: block.annotations }),
         };
+
+      case 'audio':
+        return {
+          type: 'audio',
+          data: block.data,
+          mimeType: block.mimeType,
+          ...(block.annotations && { annotations: block.annotations }),
+        };
+
+      case 'resource':
+        return {
+          type: 'resource',
+          resource: block.resource,
+          ...(block.annotations && { annotations: block.annotations }),
+        };
+
+      case 'resource_link':
+        return {
+          type: 'resource_link',
+          uri: block.uri,
+          name: block.name,
+          ...(block.mimeType && { mimeType: block.mimeType }),
+          ...(block.title && { title: block.title }),
+          ...(block.description && { description: block.description }),
+          ...(block.size !== undefined && { size: block.size }),
+          ...(block.annotations && { annotations: block.annotations }),
+        };
+
       default:
         return {
           type: 'text',
@@ -734,11 +798,19 @@ export class PromptHandler {
   private getContentSize(block: ContentBlock): number {
     switch (block.type) {
       case 'text':
-        return block.value.length;
+        return (block.text || block.value || '').length;
       case 'code':
         return block.value.length;
       case 'image':
-        return block.value.length;
+        return (block.data || block.value || '').length;
+      case 'audio':
+        return block.data.length;
+      case 'resource':
+        return 'text' in block.resource
+          ? block.resource.text.length
+          : block.resource.blob.length;
+      case 'resource_link':
+        return block.uri.length + block.name.length;
       default:
         return 0;
     }

@@ -11,6 +11,9 @@ import {
   type TextContentBlock,
   type CodeContentBlock,
   type ImageContentBlock,
+  type AudioContentBlock,
+  type EmbeddedResourceContentBlock,
+  type ResourceLinkContentBlock,
   type Logger,
   type AdapterConfig,
 } from '../types';
@@ -42,32 +45,84 @@ export class ContentProcessor {
   }
 
   /**
-   * Normalize content block to use 'value' field
-   * Converts old format (text/code/data) to new format (value)
+   * Normalize content block to ACP spec format
+   * Per ACP spec: text uses 'text', image/audio use 'data'
+   * Handles backward compatibility with old 'value' field
    */
   private normalizeContentBlock(block: any): ContentBlock {
     const normalized = { ...block };
 
     switch (block.type) {
       case 'text':
-        // Convert 'text' field to 'value' if needed
-        if (block.text && !block.value) {
-          normalized.value = block.text;
-          delete normalized.text;
+        // Per ACP spec: use 'text' field
+        if (block.value && !block.text) {
+          normalized.text = block.value;
+        } else if (!block.text && !block.value) {
+          throw new ProtocolError('Text content block missing text field');
+        }
+        // Ensure text field exists
+        if (!normalized.text) {
+          normalized.text = normalized.value || '';
         }
         break;
+
       case 'code':
-        // Convert 'code' field to 'value' if needed
-        if (block.code && !block.value) {
-          normalized.value = block.code;
-          delete normalized.code;
+        // Code is internal only, keep value
+        if (!block.value) {
+          throw new ProtocolError('Code content block missing value field');
         }
         break;
+
       case 'image':
-        // Convert 'data' field to 'value' if needed
-        if (block.data && !block.value) {
-          normalized.value = block.data;
-          delete normalized.data;
+        // Per ACP spec: use 'data' field
+        if (block.value && !block.data) {
+          normalized.data = block.value;
+        } else if (!block.data && !block.value) {
+          throw new ProtocolError('Image content block missing data field');
+        }
+        // Ensure data field exists
+        if (!normalized.data) {
+          normalized.data = normalized.value || '';
+        }
+        if (!block.mimeType) {
+          throw new ProtocolError('Image content block missing mimeType field');
+        }
+        break;
+
+      case 'audio':
+        // Per ACP spec: use 'data' field
+        if (!block.data) {
+          throw new ProtocolError('Audio content block missing data field');
+        }
+        if (!block.mimeType) {
+          throw new ProtocolError('Audio content block missing mimeType field');
+        }
+        break;
+
+      case 'resource':
+        // Per ACP spec: embedded resource
+        if (!block.resource) {
+          throw new ProtocolError(
+            'Resource content block missing resource field'
+          );
+        }
+        if (!block.resource.uri) {
+          throw new ProtocolError('Resource missing uri field');
+        }
+        if (!block.resource.text && !block.resource.blob) {
+          throw new ProtocolError(
+            'Resource must have either text or blob field'
+          );
+        }
+        break;
+
+      case 'resource_link':
+        // Per ACP spec: resource link
+        if (!block.uri) {
+          throw new ProtocolError('Resource link missing uri field');
+        }
+        if (!block.name) {
+          throw new ProtocolError('Resource link missing name field');
         }
         break;
     }
@@ -136,6 +191,12 @@ export class ContentProcessor {
         return this.processCodeBlock(block, index);
       case 'image':
         return this.processImageBlock(block, index);
+      case 'audio':
+        return this.processAudioBlock(block, index);
+      case 'resource':
+        return this.processResourceBlock(block, index);
+      case 'resource_link':
+        return this.processResourceLinkBlock(block, index);
       default:
         throw new ProtocolError(
           `Unknown content block type: ${(block as any).type}`
@@ -145,24 +206,29 @@ export class ContentProcessor {
 
   /**
    * Process text content block
+   * Per ACP spec: uses 'text' field
    */
   private async processTextBlock(
     block: TextContentBlock,
     index: number
   ): Promise<ProcessedContent> {
+    const textContent = block.text || block.value || ''; // Support both new and old format
+
     this.logger.debug('Processing text block', {
       index,
-      length: block.value.length,
+      length: textContent.length,
+      hasAnnotations: Boolean(block.annotations),
     });
 
     // Basic text sanitization and formatting
-    const value = this.sanitizeText(block.value);
+    const value = this.sanitizeText(textContent);
 
     return {
       value,
       metadata: {
-        originalLength: block.value.length,
-        sanitized: value !== block.value,
+        originalLength: textContent.length,
+        sanitized: value !== textContent,
+        annotations: block.annotations,
         ...(block.metadata || {}),
       },
     };
@@ -218,20 +284,25 @@ export class ContentProcessor {
 
   /**
    * Process image content block
+   * Per ACP spec: uses 'data' field
    */
   private async processImageBlock(
     block: ImageContentBlock,
     index: number
   ): Promise<ProcessedContent> {
+    const imageData = block.data || block.value || ''; // Support both new and old format
+
     this.logger.debug('Processing image block', {
       index,
       mimeType: block.mimeType,
-      dataLength: block.value.length,
+      dataLength: imageData.length,
       filename: block.filename,
+      uri: block.uri,
+      hasAnnotations: Boolean(block.annotations),
     });
 
     // Validate image data
-    if (!this.isValidBase64(block.value)) {
+    if (!this.isValidBase64(imageData)) {
       throw new ProtocolError(`Invalid base64 image data in block ${index}`);
     }
 
@@ -240,11 +311,13 @@ export class ContentProcessor {
 
     if (block.filename) {
       value += `# Image: ${block.filename}\n`;
+    } else if (block.uri) {
+      value += `# Image: ${block.uri}\n`;
     } else {
       value += `# Image (${block.mimeType})\n`;
     }
 
-    value += `[Image data: ${block.mimeType}, ${this.formatDataSize(block.value.length)} base64]`;
+    value += `[Image data: ${block.mimeType}, ${this.formatDataSize(imageData.length)} base64]`;
 
     // Note: In a real implementation, you might want to:
     // 1. Save the image to a temporary file
@@ -256,9 +329,143 @@ export class ContentProcessor {
       metadata: {
         mimeType: block.mimeType,
         filename: block.filename,
-        dataSize: block.value.length,
+        uri: block.uri,
+        dataSize: imageData.length,
         isValidBase64: true,
+        annotations: block.annotations,
         ...(block.metadata || {}),
+      },
+    };
+  }
+
+  /**
+   * Process audio content block
+   * Per ACP spec: Audio data for transcription or analysis
+   */
+  private async processAudioBlock(
+    block: AudioContentBlock,
+    index: number
+  ): Promise<ProcessedContent> {
+    this.logger.debug('Processing audio block', {
+      index,
+      mimeType: block.mimeType,
+      dataLength: block.data.length,
+      hasAnnotations: Boolean(block.annotations),
+    });
+
+    // Validate audio data
+    if (!this.isValidBase64(block.data)) {
+      throw new ProtocolError(`Invalid base64 audio data in block ${index}`);
+    }
+
+    const dataSize = this.formatDataSize(block.data.length);
+    const audioFormat = block.mimeType.split('/')[1] || 'unknown';
+
+    const value = `[Audio: ${block.mimeType}, ${dataSize}, format: ${audioFormat}]`;
+
+    return {
+      value,
+      metadata: {
+        mimeType: block.mimeType,
+        dataSize: block.data.length,
+        format: audioFormat,
+        isValidBase64: true,
+        annotations: block.annotations,
+      },
+    };
+  }
+
+  /**
+   * Process embedded resource content block
+   * Per ACP spec: Preferred way to include context (e.g., file contents)
+   */
+  private async processResourceBlock(
+    block: EmbeddedResourceContentBlock,
+    index: number
+  ): Promise<ProcessedContent> {
+    const { uri, mimeType } = block.resource;
+    const isText = 'text' in block.resource;
+
+    this.logger.debug('Processing resource block', {
+      index,
+      uri,
+      mimeType,
+      isText,
+      hasAnnotations: Boolean(block.annotations),
+    });
+
+    let value = '';
+    let size = 0;
+
+    value += `# Resource: ${uri}\n`;
+    if (mimeType) {
+      value += `# Type: ${mimeType}\n`;
+    }
+    value += '\n';
+
+    if (isText && 'text' in block.resource) {
+      value += block.resource.text;
+      size = block.resource.text.length;
+    } else if ('blob' in block.resource) {
+      const blobSize = this.formatDataSize(block.resource.blob.length);
+      value += `[Binary data: ${blobSize}]`;
+      size = block.resource.blob.length;
+    }
+
+    return {
+      value,
+      metadata: {
+        uri,
+        mimeType,
+        isText,
+        size,
+        annotations: block.annotations,
+      },
+    };
+  }
+
+  /**
+   * Process resource link content block
+   * Per ACP spec: Reference to agent-accessible resources
+   */
+  private async processResourceLinkBlock(
+    block: ResourceLinkContentBlock,
+    index: number
+  ): Promise<ProcessedContent> {
+    this.logger.debug('Processing resource link block', {
+      index,
+      uri: block.uri,
+      name: block.name,
+      hasAnnotations: Boolean(block.annotations),
+    });
+
+    let value = '';
+    value += `# Resource Link: ${block.name}\n`;
+    value += `URI: ${block.uri}\n`;
+
+    if (block.title) {
+      value += `Title: ${block.title}\n`;
+    }
+    if (block.description) {
+      value += `Description: ${block.description}\n`;
+    }
+    if (block.mimeType) {
+      value += `Type: ${block.mimeType}\n`;
+    }
+    if (block.size !== undefined) {
+      value += `Size: ${this.formatDataSize(block.size)}\n`;
+    }
+
+    return {
+      value,
+      metadata: {
+        uri: block.uri,
+        name: block.name,
+        mimeType: block.mimeType,
+        title: block.title,
+        description: block.description,
+        size: block.size,
+        annotations: block.annotations,
       },
     };
   }
@@ -338,7 +545,7 @@ export class ContentProcessor {
       // Flush any remaining text
       result = {
         type: 'text',
-        value: state.accumulatedContent,
+        text: state.accumulatedContent,
       };
     }
 
@@ -398,7 +605,7 @@ export class ContentProcessor {
           // Return text block - code block will be processed on next chunk
           return {
             type: 'text',
-            value: textToReturn,
+            text: textToReturn,
           };
         } else {
           // Code block starts at beginning
@@ -439,14 +646,14 @@ export class ContentProcessor {
             if (beforeImage) {
               return {
                 type: 'text',
-                value: beforeImage,
+                text: beforeImage,
               };
             }
 
             // Return image reference
             return {
               type: 'text',
-              value: imageText,
+              text: imageText,
               metadata: { isImageReference: true },
             };
           }
@@ -465,7 +672,7 @@ export class ContentProcessor {
             state.accumulatedContent = accumulated.substring(lastNewline + 1);
             return {
               type: 'text',
-              value: textToReturn,
+              text: textToReturn,
             };
           }
         }
@@ -537,7 +744,7 @@ export class ContentProcessor {
       state.accumulatedContent = '';
       return {
         type: 'text',
-        value: textToReturn,
+        text: textToReturn,
       };
     }
 
@@ -609,7 +816,7 @@ export class ContentProcessor {
     }
     return {
       type: 'text',
-      value: trimmed,
+      text: trimmed,
     };
   }
 
@@ -644,7 +851,7 @@ export class ContentProcessor {
     const lines = section.split('\n');
     const firstLine = lines[0];
     if (!firstLine) {
-      return { type: 'text', value: '' };
+      return { type: 'text', text: '' };
     }
 
     const filename = firstLine.replace('# File:', '').trim();
@@ -664,7 +871,7 @@ export class ContentProcessor {
     // File header only - will be combined with following code block in post-processing
     return {
       type: 'text',
-      value: '',
+      text: '',
       metadata: { filename },
     };
   }
@@ -677,7 +884,7 @@ export class ContentProcessor {
     // In a real implementation, you might extract base64 data
     return {
       type: 'text',
-      value: section,
+      text: section,
       metadata: { isImageReference: true },
     };
   }
@@ -733,13 +940,25 @@ export class ContentProcessor {
 
       switch (block.type) {
         case 'text':
-          stats.totalSize += block.value.length;
+          stats.totalSize += (block.text || block.value || '').length;
           break;
         case 'code':
           stats.totalSize += block.value.length;
           break;
         case 'image':
-          stats.totalSize += block.value.length;
+          stats.totalSize += (block.data || block.value || '').length;
+          break;
+        case 'audio':
+          stats.totalSize += block.data.length;
+          break;
+        case 'resource':
+          stats.totalSize +=
+            'text' in block.resource
+              ? block.resource.text.length
+              : block.resource.blob.length;
+          break;
+        case 'resource_link':
+          stats.totalSize += block.uri.length;
           break;
       }
     }
@@ -791,8 +1010,11 @@ export class ContentProcessor {
 
     switch (block.type) {
       case 'text':
-        if (typeof block.value !== 'string') {
-          errors.push(`Block ${index}: value content must be a string`);
+        // Per ACP spec: text content uses 'text' field (accept 'value' for backward compatibility)
+        if (typeof block.text !== 'string' && typeof block.value !== 'string') {
+          errors.push(
+            `Block ${index}: text content must be a string (use 'text' field)`
+          );
         }
         break;
       case 'code':
@@ -806,11 +1028,15 @@ export class ContentProcessor {
           errors.push(`Block ${index}: filename must be a string`);
         }
         break;
-      case 'image':
-        if (typeof block.value !== 'string') {
-          errors.push(`Block ${index}: value must be a string`);
-        } else if (!this.isValidBase64(block.value)) {
-          errors.push(`Block ${index}: value must be valid base64`);
+      case 'image': {
+        // Per ACP spec: image content uses 'data' field (accept 'value' for backward compatibility)
+        const imageData = block.data || block.value;
+        if (typeof imageData !== 'string') {
+          errors.push(
+            `Block ${index}: data must be a string (use 'data' field)`
+          );
+        } else if (!this.isValidBase64(imageData)) {
+          errors.push(`Block ${index}: data must be valid base64`);
         }
         if (typeof block.mimeType !== 'string') {
           errors.push(
@@ -819,6 +1045,48 @@ export class ContentProcessor {
         }
         if (block.filename && typeof block.filename !== 'string') {
           errors.push(`Block ${index}: filename must be a string`);
+        }
+        break;
+      }
+      case 'audio':
+        // Per ACP spec: audio content
+        if (typeof block.data !== 'string') {
+          errors.push(`Block ${index}: data must be a string`);
+        } else if (!this.isValidBase64(block.data)) {
+          errors.push(`Block ${index}: data must be valid base64`);
+        }
+        if (typeof block.mimeType !== 'string') {
+          errors.push(
+            `Block ${index}: mimeType is required and must be a string`
+          );
+        }
+        break;
+      case 'resource':
+        // Per ACP spec: embedded resource
+        if (!block.resource || typeof block.resource !== 'object') {
+          errors.push(`Block ${index}: resource field is required`);
+        } else {
+          if (typeof block.resource.uri !== 'string') {
+            errors.push(
+              `Block ${index}: resource.uri is required and must be a string`
+            );
+          }
+          const hasText = typeof block.resource.text === 'string';
+          const hasBlob = typeof block.resource.blob === 'string';
+          if (!hasText && !hasBlob) {
+            errors.push(
+              `Block ${index}: resource must have either text or blob field`
+            );
+          }
+        }
+        break;
+      case 'resource_link':
+        // Per ACP spec: resource link
+        if (typeof block.uri !== 'string') {
+          errors.push(`Block ${index}: uri is required and must be a string`);
+        }
+        if (typeof block.name !== 'string') {
+          errors.push(`Block ${index}: name is required and must be a string`);
         }
         break;
       default:

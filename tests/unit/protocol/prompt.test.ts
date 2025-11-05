@@ -619,13 +619,13 @@ describe('PromptHandler', () => {
         params: {
           ...testRequest.params,
           content: [
-            { type: 'text', value: 'Here is some code:' },
+            { type: 'text', text: 'Here is some code:' },
             {
               type: 'code',
               value: 'const x = 42;',
               language: 'typescript',
             },
-            { type: 'text', value: 'What do you think?' },
+            { type: 'text', text: 'What do you think?' },
           ],
         },
       };

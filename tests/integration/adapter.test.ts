@@ -606,8 +606,8 @@ describe('CursorAgentAdapter Integration', () => {
               },
               {
                 type: 'code',
+                value: 'const x: string = "hello";',
                 language: 'typescript',
-                code: 'const x: string = "hello";',
                 filename: 'test.ts',
               },
             ],
