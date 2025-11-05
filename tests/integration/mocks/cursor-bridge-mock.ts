@@ -14,7 +14,10 @@ import type {
   AdapterConfig,
   Logger,
 } from '../../../src/types';
-import type { PromptOptions, StreamingPromptOptions } from '../../../src/cursor/cli-bridge';
+import type {
+  PromptOptions,
+  StreamingPromptOptions,
+} from '../../../src/cursor/cli-bridge';
 
 export class MockCursorCliBridge {
   private config: AdapterConfig;
@@ -82,11 +85,17 @@ export class MockCursorCliBridge {
     let response = 'This is a mock response from the cursor-agent simulator.';
 
     if (contentLower.includes('typescript')) {
-      response = 'TypeScript is a statically typed superset of JavaScript that adds type safety.';
-    } else if (contentLower.includes('code') || contentLower.includes('review')) {
-      response = 'The code looks good. Consider adding error handling and type annotations.';
+      response =
+        'TypeScript is a statically typed superset of JavaScript that adds type safety.';
+    } else if (
+      contentLower.includes('code') ||
+      contentLower.includes('review')
+    ) {
+      response =
+        'The code looks good. Consider adding error handling and type annotations.';
     } else if (contentLower.includes('help')) {
-      response = 'I can help you with coding questions, code review, and technical explanations.';
+      response =
+        'I can help you with coding questions, code review, and technical explanations.';
     }
 
     return {
