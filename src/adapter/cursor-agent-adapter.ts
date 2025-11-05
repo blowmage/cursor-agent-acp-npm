@@ -17,6 +17,12 @@ import {
   type Logger,
   type AcpRequest,
   type AcpResponse,
+  type SessionNewParams,
+  type SessionLoadParams,
+  type SessionListParams,
+  type SessionUpdateParams,
+  type SessionDeleteParams,
+  type SessionCancelParams,
 } from '../types';
 import { createLogger } from '../utils/logger';
 import { validateConfig } from '../utils/config';
@@ -422,6 +428,18 @@ export class CursorAgentAdapter {
 
   private async processStdioMessage(message: string): Promise<void> {
     const request: AcpRequest = JSON.parse(message);
+
+    // Per JSON-RPC 2.0 spec: Notifications (requests without id) do not receive responses
+    const isNotification = request.id === null || request.id === undefined;
+
+    if (isNotification) {
+      this.logger.debug('Processing notification (no response)', {
+        method: request.method,
+      });
+      await this.processRequest(request);
+      return;
+    }
+
     const response = await this.processRequest(request);
 
     // Validate response before sending
@@ -466,6 +484,18 @@ export class CursorAgentAdapter {
       req.on('end', async () => {
         try {
           const request: AcpRequest = JSON.parse(body);
+
+          // Per JSON-RPC 2.0 spec: Notifications (requests without id) do not receive responses
+          const isNotification =
+            request.id === null || request.id === undefined;
+
+          if (isNotification) {
+            await this.processRequest(request);
+            res.writeHead(204); // No Content
+            res.end();
+            return;
+          }
+
           const response = await this.processRequest(request);
 
           res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -519,20 +549,21 @@ export class CursorAgentAdapter {
       throw new ProtocolError('Session manager not available');
     }
 
-    const params = (request.params as any) || {};
+    const params =
+      (request.params as SessionNewParams) || ({} as SessionNewParams);
 
     // Per ACP spec: cwd is required
-    if (typeof params['cwd'] !== 'string' || params['cwd'].trim() === '') {
+    if (typeof params.cwd !== 'string' || params.cwd.trim() === '') {
       throw new ProtocolError(
         'cwd (working directory) is required and must be a non-empty string'
       );
     }
 
     // Per ACP spec: mcpServers is required (can be empty array)
-    const mcpServers = params['mcpServers'] || [];
+    const mcpServers = params.mcpServers || [];
 
     // Validate cwd is an absolute path
-    const cwd = params['cwd'];
+    const cwd = params.cwd;
     if (typeof cwd !== 'string') {
       throw new ProtocolError('cwd must be a string (per ACP spec)');
     }
@@ -543,7 +574,7 @@ export class CursorAgentAdapter {
     // Per ACP spec: session/new includes cwd (working directory) parameter
     // Store this in metadata so we can use it when executing commands
     const metadata = {
-      ...(params['metadata'] || {}),
+      ...((params as any).metadata || {}),
       cwd: cwd, // Capture working directory
       mcpServers: mcpServers, // Store MCP server configurations
     };
@@ -584,23 +615,24 @@ export class CursorAgentAdapter {
       throw new ProtocolError('Session manager not available');
     }
 
-    const params = (request.params as any) || {};
-    if (!params['sessionId']) {
+    const params =
+      (request.params as SessionLoadParams) || ({} as SessionLoadParams);
+    if (!params.sessionId) {
       throw new ProtocolError('sessionId is required');
     }
 
     // Per ACP spec: cwd and mcpServers are required parameters
-    if (!params['cwd']) {
+    if (!params.cwd) {
       throw new ProtocolError('cwd is required');
     }
 
-    if (!params['mcpServers']) {
+    if (!params.mcpServers) {
       throw new ProtocolError('mcpServers is required');
     }
 
-    const sessionId = params['sessionId'];
-    const cwd = params['cwd'];
-    const mcpServers = params['mcpServers'];
+    const sessionId = params.sessionId;
+    const cwd = params.cwd;
+    const mcpServers = params.mcpServers;
 
     // Validate cwd is an absolute path
     if (typeof cwd !== 'string') {
@@ -684,11 +716,12 @@ export class CursorAgentAdapter {
       throw new ProtocolError('Session manager not available');
     }
 
-    const params = (request.params as any) || {};
+    const params =
+      (request.params as SessionListParams) || ({} as SessionListParams);
     const result = await this.sessionManager.listSessions(
-      params['limit'],
-      params['offset'],
-      params['filter']
+      params.limit,
+      params.offset,
+      params.filter
     );
 
     return {
@@ -707,21 +740,22 @@ export class CursorAgentAdapter {
       throw new ProtocolError('Session manager not available');
     }
 
-    const params = (request.params as any) || {};
-    if (!params['sessionId']) {
+    const params =
+      (request.params as SessionUpdateParams) || ({} as SessionUpdateParams);
+    if (!params.sessionId) {
       throw new ProtocolError('sessionId is required');
     }
 
     await this.sessionManager.updateSession(
-      params['sessionId'],
-      params['metadata'] || {}
+      params.sessionId,
+      params.metadata || {}
     );
 
     return {
       jsonrpc: '2.0',
       id: request.id,
       result: {
-        sessionId: params['sessionId'],
+        sessionId: params.sessionId,
         updated: true,
       },
     };
@@ -732,18 +766,19 @@ export class CursorAgentAdapter {
       throw new ProtocolError('Session manager not available');
     }
 
-    const params = (request.params as any) || {};
-    if (!params['sessionId']) {
+    const params =
+      (request.params as SessionDeleteParams) || ({} as SessionDeleteParams);
+    if (!params.sessionId) {
       throw new ProtocolError('sessionId is required');
     }
 
-    await this.sessionManager.deleteSession(params['sessionId']);
+    await this.sessionManager.deleteSession(params.sessionId);
 
     return {
       jsonrpc: '2.0',
       id: request.id,
       result: {
-        sessionId: params['sessionId'],
+        sessionId: params.sessionId,
         deleted: true,
       },
     };
@@ -761,28 +796,45 @@ export class CursorAgentAdapter {
       throw new ProtocolError('Prompt handler not available');
     }
 
-    const params = (request.params as any) || {};
-    const sessionId = params['sessionId'];
+    const params =
+      (request.params as SessionCancelParams) || ({} as SessionCancelParams);
+    const sessionId = params.sessionId;
 
     if (!sessionId || typeof sessionId !== 'string') {
       throw new ProtocolError('sessionId is required and must be a string');
     }
 
-    this.logger.info('Handling session cancellation request', { sessionId });
+    this.logger.info('Handling session cancellation notification', {
+      sessionId,
+    });
 
-    // Cancel all active requests for this session
-    // Per ACP spec: Agent MUST stop all operations
+    // Per ACP spec: session/cancel is a notification (no response expected)
+    // Agent MUST stop all operations and respond to the original session/prompt
+    // request with the 'cancelled' stop reason (handled in PromptHandler)
     await this.promptHandler.cancelSession(sessionId);
 
-    // Per ACP spec: session/cancel is a notification
-    // Return success response
+    // Per JSON-RPC 2.0 spec: Notifications do not receive responses
+    // However, if the client incorrectly sent this as a request (with id),
+    // we still need to return a response to avoid leaving the client hanging
+    // This is a defensive implementation for non-compliant clients
+    if (request.id !== undefined && request.id !== null) {
+      this.logger.warn(
+        'Received session/cancel with id field - should be a notification per ACP spec',
+        { sessionId, id: request.id }
+      );
+      return {
+        jsonrpc: '2.0',
+        id: request.id,
+        result: null,
+      };
+    }
+
+    // For proper notifications (no id), return a dummy response
+    // The processRequest handler should not send this to the client
     return {
       jsonrpc: '2.0',
-      id: request.id,
-      result: {
-        sessionId,
-        cancelled: true,
-      },
+      id: null,
+      result: null,
     };
   }
 
@@ -811,15 +863,17 @@ export class CursorAgentAdapter {
       throw new ProtocolError('Tool registry not available');
     }
 
-    const params = (request.params as any) || {};
-    if (!params['name']) {
+    const params =
+      (request.params as { name: string; parameters?: Record<string, any> }) ||
+      ({} as { name: string; parameters?: Record<string, any> });
+    if (!params.name) {
       throw new ProtocolError('tool name is required');
     }
 
     const toolCall = {
       id: request.id.toString(),
-      name: params['name'],
-      parameters: params['parameters'] || {},
+      name: params.name,
+      parameters: params.parameters || {},
     };
 
     const result = await this.toolRegistry.executeTool(toolCall);
