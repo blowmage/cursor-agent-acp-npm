@@ -26,6 +26,7 @@ export interface ToolCallInfo {
   startTime: Date;
   endTime?: Date;
   update: ToolCallUpdate;
+  cleanupTimeoutId?: NodeJS.Timeout;
 }
 
 export interface ToolCallManagerOptions {
@@ -293,9 +294,17 @@ export class ToolCallManager {
     });
 
     // Clean up after a delay to allow for inspection
-    setTimeout(() => {
-      this.activeToolCalls.delete(toolCallId);
-    }, 30000); // 30 seconds
+    const toolCallInfo = this.activeToolCalls.get(toolCallId);
+    if (toolCallInfo) {
+      // Clear any existing timeout first
+      if (toolCallInfo.cleanupTimeoutId) {
+        clearTimeout(toolCallInfo.cleanupTimeoutId);
+      }
+
+      toolCallInfo.cleanupTimeoutId = setTimeout(() => {
+        this.activeToolCalls.delete(toolCallId);
+      }, 30000); // 30 seconds
+    }
   }
 
   /**
@@ -340,9 +349,17 @@ export class ToolCallManager {
     await this.updateToolCall(sessionId, toolCallId, updateOptions);
 
     // Clean up after a delay to allow for inspection
-    setTimeout(() => {
-      this.activeToolCalls.delete(toolCallId);
-    }, 30000); // 30 seconds
+    const toolCallInfo = this.activeToolCalls.get(toolCallId);
+    if (toolCallInfo) {
+      // Clear any existing timeout first
+      if (toolCallInfo.cleanupTimeoutId) {
+        clearTimeout(toolCallInfo.cleanupTimeoutId);
+      }
+
+      toolCallInfo.cleanupTimeoutId = setTimeout(() => {
+        this.activeToolCalls.delete(toolCallId);
+      }, 30000); // 30 seconds
+    }
   }
 
   /**
@@ -381,6 +398,11 @@ export class ToolCallManager {
         });
       }
 
+      // Clear any pending cleanup timeout
+      if (toolCall.cleanupTimeoutId) {
+        clearTimeout(toolCall.cleanupTimeoutId);
+      }
+
       this.activeToolCalls.delete(toolCall.toolCallId);
     }
 
@@ -417,6 +439,14 @@ export class ToolCallManager {
    */
   async cleanup(): Promise<void> {
     this.logger.debug('Cleaning up tool call manager');
+
+    // Clear all pending cleanup timeouts before clearing the map
+    for (const toolCall of this.activeToolCalls.values()) {
+      if (toolCall.cleanupTimeoutId) {
+        clearTimeout(toolCall.cleanupTimeoutId);
+      }
+    }
+
     this.activeToolCalls.clear();
   }
 }
