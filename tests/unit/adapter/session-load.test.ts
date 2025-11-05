@@ -4,13 +4,56 @@
  */
 
 import { CursorAgentAdapter } from '../../../src/adapter/cursor-agent-adapter';
-import { AcpRequest } from '../../../src/protocol/types';
+import type { AdapterConfig, AcpRequest, Logger } from '../../../src/types';
+
+// Mock the CursorCliBridge module
+jest.mock('../../../src/cursor/cli-bridge', () => ({
+  CursorCliBridge: jest.fn().mockImplementation((config, logger) => {
+    return {
+      getVersion: jest.fn().mockResolvedValue('1.0.0'),
+      checkAuthentication: jest
+        .fn()
+        .mockResolvedValue({ authenticated: true, user: 'test' }),
+      close: jest.fn().mockResolvedValue(undefined),
+    };
+  }),
+}));
+
+// Mock logger for tests
+const mockLogger: Logger = {
+  error: jest.fn(),
+  warn: jest.fn(),
+  info: jest.fn(),
+  debug: jest.fn(),
+};
+
+// Test configuration
+const testConfig: AdapterConfig = {
+  logLevel: 'debug',
+  sessionDir: '/tmp/cursor-test-sessions',
+  maxSessions: 10,
+  sessionTimeout: 60000,
+  tools: {
+    filesystem: {
+      enabled: true,
+      allowedPaths: ['/tmp', './'],
+    },
+    terminal: {
+      enabled: true,
+      maxProcesses: 3,
+    },
+  },
+  cursor: {
+    timeout: 30000,
+    retries: 1,
+  },
+};
 
 describe('CursorAgentAdapter - session/load', () => {
   let adapter: CursorAgentAdapter;
 
   beforeEach(async () => {
-    adapter = new CursorAgentAdapter();
+    adapter = new CursorAgentAdapter(testConfig, { logger: mockLogger });
     await adapter.initialize();
 
     // Create a session first for loading
@@ -27,7 +70,14 @@ describe('CursorAgentAdapter - session/load', () => {
   });
 
   afterEach(async () => {
-    await adapter.dispose();
+    if (adapter) {
+      try {
+        await adapter.shutdown();
+      } catch (error) {
+        // Ignore shutdown errors in tests
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
   });
 
   describe('cwd validation', () => {

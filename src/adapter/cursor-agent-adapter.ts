@@ -519,11 +519,10 @@ export class CursorAgentAdapter {
     const params = (request.params as any) || {};
 
     // Per ACP spec: cwd is required
-    if (
-      typeof params['cwd'] !== 'string' ||
-      params['cwd'].trim() === ''
-    ) {
-      throw new ProtocolError('cwd (working directory) is required and must be a non-empty string');
+    if (typeof params['cwd'] !== 'string' || params['cwd'].trim() === '') {
+      throw new ProtocolError(
+        'cwd (working directory) is required and must be a non-empty string'
+      );
     }
 
     // Per ACP spec: mcpServers is required (can be empty array)
@@ -534,7 +533,7 @@ export class CursorAgentAdapter {
     if (typeof cwd !== 'string') {
       throw new ProtocolError('cwd must be a string (per ACP spec)');
     }
-    if (!cwd.startsWith('/') && !cwd.match(/^[A-Za-z]:\\/)) {
+    if (!cwd.startsWith('/') && !cwd.match(/^[A-Za-z]:[/\\]/)) {
       throw new ProtocolError('cwd must be an absolute path (per ACP spec)');
     }
 
@@ -604,7 +603,7 @@ export class CursorAgentAdapter {
     if (typeof cwd !== 'string') {
       throw new ProtocolError('cwd must be a string (per ACP spec)');
     }
-    if (!cwd.startsWith('/') && !cwd.match(/^[A-Za-z]:\\/)) {
+    if (!cwd.startsWith('/') && !cwd.match(/^[A-Za-z]:[/\\]/)) {
       throw new ProtocolError('cwd must be an absolute path (per ACP spec)');
     }
 

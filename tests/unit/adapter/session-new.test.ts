@@ -204,9 +204,8 @@ describe('session/new - Parameter Validation', () => {
       expect(response.error).toBeUndefined();
     });
 
-    it('should reject Windows paths with forward slashes (not backslashes)', async () => {
-      // Note: Current implementation only accepts Windows paths with backslashes (C:\)
-      // Forward slashes (D:/) are not recognized as valid Windows absolute paths
+    it('should accept Windows paths with forward slashes', async () => {
+      // Windows accepts both forward slashes (D:/) and backslashes (D:\)
       const request: AcpRequest = {
         jsonrpc: '2.0',
         method: 'session/new',
@@ -219,9 +218,10 @@ describe('session/new - Parameter Validation', () => {
 
       const response = await adapter.processRequest(request);
 
-      // Should reject because forward slashes aren't recognized
-      expect(response.error).toBeDefined();
-      expect(response.error?.message).toContain('cwd must be an absolute path');
+      // Should accept both forward and backward slashes
+      expect(response.result).toBeDefined();
+      expect(response.result.sessionId).toBeDefined();
+      expect(response.error).toBeUndefined();
     });
 
     it('should handle cwd with special characters', async () => {
