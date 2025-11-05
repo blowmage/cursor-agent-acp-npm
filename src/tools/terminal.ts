@@ -31,6 +31,7 @@ export interface ShellSession {
   workingDirectory: string;
   createdAt: Date;
   lastActivity: Date;
+  forceKillTimeoutId?: NodeJS.Timeout;
 }
 
 export class TerminalToolProvider implements ToolProvider {
@@ -316,6 +317,7 @@ export class TerminalToolProvider implements ToolProvider {
         },
         metadata: {
           createdAt: session.createdAt.toISOString(),
+          terminalId: sessionId, // For ACP terminal content type
         },
       };
     } catch (error) {
@@ -392,6 +394,7 @@ export class TerminalToolProvider implements ToolProvider {
         metadata: {
           timeout,
           outputLength: output.stdout.length,
+          terminalId: sessionId, // For ACP terminal content type
         },
       };
     } catch (error) {
@@ -435,11 +438,14 @@ export class TerminalToolProvider implements ToolProvider {
       }
 
       // Force kill after timeout
-      setTimeout(() => {
+      const forceKillTimeoutId = setTimeout(() => {
         if (!session.process.killed) {
           session.process.kill('SIGTERM');
         }
       }, 2000);
+
+      // Store timeout ID before deleting session
+      session.forceKillTimeoutId = forceKillTimeoutId;
 
       this.activeSessions.delete(sessionId);
       this.activeProcesses.delete(session.process);
@@ -701,6 +707,12 @@ export class TerminalToolProvider implements ToolProvider {
     // Close all shell sessions
     for (const [sessionId, session] of this.activeSessions) {
       this.logger.debug(`Terminating session: ${sessionId}`);
+
+      // Clear any pending force-kill timeout
+      if (session.forceKillTimeoutId) {
+        clearTimeout(session.forceKillTimeoutId);
+      }
+
       if (!session.process.killed) {
         session.process.kill('SIGTERM');
       }
