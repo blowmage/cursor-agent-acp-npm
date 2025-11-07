@@ -5,6 +5,10 @@
  * Manages tool call notifications, permission requests, and state tracking.
  *
  * All notifications now use SDK types for full compliance.
+ *
+ * SECURITY NOTE: All _meta fields in notifications are visible to clients.
+ * Do not include sensitive information (secrets, internal paths, etc.).
+ * Only include debugging/monitoring data that is safe to expose.
  */
 
 import type {

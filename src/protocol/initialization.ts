@@ -196,30 +196,41 @@ export class InitializationHandler {
         authMethods,
 
         // Extension point for debugging and monitoring
+        // SECURITY NOTE: All _meta fields are visible to clients
+        // Do NOT include:
+        //  - Environment variables (NODE_ENV, secrets, API keys)
+        //  - Internal paths or file system layout
+        //  - Database connection strings
+        //  - Security configuration details
+        //  - Any PII or sensitive data
+        // Only include information that helps with:
+        //  - Client compatibility (node version, platform)
+        //  - Capability negotiation (available features)
+        //  - Debugging (timestamps, versions)
         _meta: {
           // Initialization metadata
           initializationTime: new Date().toISOString(),
           initializationDurationMs: Date.now() - startTime,
 
-          // Cursor CLI status
+          // Cursor CLI status (helps client understand capabilities)
           cursorCliStatus: connectivityTest?.success
             ? 'available'
             : 'unavailable',
           cursorVersion: connectivityTest?.version,
           cursorAuthenticated: connectivityTest?.authenticated,
 
-          // Environment information
+          // Runtime information (helps with compatibility debugging)
           nodeVersion: process.version,
           platform: process.platform,
           arch: process.arch,
 
-          // Configuration summary (no sensitive data)
+          // Configuration summary (helps client know available features)
           toolsEnabled: {
             filesystem: this.config.tools.filesystem.enabled,
             terminal: this.config.tools.terminal.enabled,
           },
 
-          // Version negotiation details
+          // Version negotiation details (transparency in protocol handling)
           versionNegotiation: {
             clientRequested: params.protocolVersion,
             agentResponded: agreedVersion,
@@ -228,7 +239,6 @@ export class InitializationHandler {
 
           // Implementation details
           implementation: 'cursor-agent-acp-npm',
-          environment: process.env['NODE_ENV'] || 'production',
         },
       };
 
