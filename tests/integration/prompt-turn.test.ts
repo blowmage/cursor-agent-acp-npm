@@ -457,7 +457,7 @@ describe('Prompt Turn Integration Tests', () => {
       notifications = [];
     });
 
-    it('should send tool_call notification at start of processing', async () => {
+    it('should send agent_thought_chunk notification at start of processing', async () => {
       const promptPromise = adapter.processRequest({
         jsonrpc: '2.0',
         method: 'session/prompt',
@@ -471,24 +471,23 @@ describe('Prompt Turn Integration Tests', () => {
       // Wait a bit for processing to start
       await new Promise((resolve) => setTimeout(resolve, 100));
 
-      // Should have received tool_call notification
-      const toolCallNotification = notifications.find(
+      // Should have received agent_thought_chunk notification
+      const thoughtNotification = notifications.find(
         (n) =>
           n.method === 'session/update' &&
-          n.params?.update?.sessionUpdate === 'tool_call'
+          n.params?.update?.sessionUpdate === 'agent_thought_chunk'
       );
 
-      expect(toolCallNotification).toBeDefined();
-      expect(toolCallNotification?.params?.update?.status).toBe('in_progress');
-      expect(toolCallNotification?.params?.update?.toolCallId).toBeDefined();
-      expect(toolCallNotification?.params?.update?.title).toBeDefined();
-      expect(toolCallNotification?.params?.update?.kind).toBe('other');
+      expect(thoughtNotification).toBeDefined();
+      expect(thoughtNotification?.params?.update?.content).toBeDefined();
+      expect(thoughtNotification?.params?.update?.content?.type).toBe('text');
+      expect(thoughtNotification?.params?.update?.content?.text).toBeDefined();
 
       await promptPromise;
     }, 10000);
 
-    it('should send tool_call_update notification when completed', async () => {
-      await adapter.processRequest({
+    it('should complete successfully with proper stopReason', async () => {
+      const response = await adapter.processRequest({
         jsonrpc: '2.0',
         method: 'session/prompt',
         id: 'notify-test-2',
@@ -498,17 +497,21 @@ describe('Prompt Turn Integration Tests', () => {
         },
       });
 
-      // Should have completion notification
-      const completionNotification = notifications.find(
-        (n) =>
-          n.method === 'session/update' &&
-          n.params?.update?.sessionUpdate === 'tool_call_update' &&
-          n.params?.update?.status === 'completed'
-      );
+      // Should have proper stop reason in response
+      expect(response.result).toBeDefined();
+      expect(response.result.stopReason).toBeDefined();
+      expect([
+        'end_turn',
+        'refusal',
+        'cancelled',
+        'max_tokens',
+        'max_turn_requests',
+      ]).toContain(response.result.stopReason);
 
-      expect(completionNotification).toBeDefined();
-      expect(completionNotification?.params?.update?.title).toContain(
-        'completed'
+      // Should have _meta with timing information
+      expect(response.result._meta).toBeDefined();
+      expect(response.result._meta.processingDurationMs).toBeGreaterThanOrEqual(
+        0
       );
     }, 10000);
 
@@ -551,15 +554,21 @@ describe('Prompt Turn Integration Tests', () => {
         (n) => n.params?.update?.sessionUpdate
       );
 
-      // Should start with tool_call
-      expect(updateTypes[0]).toBe('tool_call');
+      // Should start with agent_thought_chunk (progress notification)
+      expect(updateTypes[0]).toBe('agent_thought_chunk');
 
-      // Should end with tool_call_update (completed or failed)
-      const lastUpdate = updateTypes[updateTypes.length - 1];
-      expect(lastUpdate).toBe('tool_call_update');
-
-      // Should have agent_message_chunk in between
+      // Should have agent_message_chunk (response content)
       expect(updateTypes).toContain('agent_message_chunk');
+
+      // Verify we have both thought and message chunks
+      const thoughtChunks = updateTypes.filter(
+        (t) => t === 'agent_thought_chunk'
+      );
+      const messageChunks = updateTypes.filter(
+        (t) => t === 'agent_message_chunk'
+      );
+      expect(thoughtChunks.length).toBeGreaterThan(0);
+      expect(messageChunks.length).toBeGreaterThan(0);
     }, 10000);
 
     it('should include sessionId in all notifications', async () => {
@@ -576,6 +585,127 @@ describe('Prompt Turn Integration Tests', () => {
       notifications.forEach((notification) => {
         expect(notification.params?.sessionId).toBe(sessionId);
       });
+    }, 10000);
+
+    it('should echo user messages via user_message_chunk (Phase 2)', async () => {
+      await adapter.processRequest({
+        jsonrpc: '2.0',
+        method: 'session/prompt',
+        id: 'notify-test-6',
+        params: {
+          sessionId,
+          content: [
+            { type: 'text', text: 'Hello' },
+            { type: 'text', text: 'World' },
+          ],
+        },
+      });
+
+      // Should have user message chunk notifications
+      const userChunks = notifications.filter(
+        (n) =>
+          n.method === 'session/update' &&
+          n.params?.update?.sessionUpdate === 'user_message_chunk'
+      );
+
+      // Should echo both content blocks
+      expect(userChunks.length).toBe(2);
+
+      // Verify content matches input (now with annotations)
+      expect(userChunks[0].params?.update?.content.type).toBe('text');
+      expect(userChunks[0].params?.update?.content.text).toBe('Hello');
+      expect(userChunks[0].params?.update?.content.annotations).toBeDefined();
+      expect(
+        userChunks[0].params?.update?.content.annotations?._meta?.source
+      ).toBe('user_input');
+
+      expect(userChunks[1].params?.update?.content.type).toBe('text');
+      expect(userChunks[1].params?.update?.content.text).toBe('World');
+      expect(userChunks[1].params?.update?.content.annotations).toBeDefined();
+    }, 10000);
+
+    it('should include content metrics in response (Phase 2)', async () => {
+      const response = await adapter.processRequest({
+        jsonrpc: '2.0',
+        method: 'session/prompt',
+        id: 'notify-test-7',
+        params: {
+          sessionId,
+          content: [{ type: 'text', text: 'Test metrics' }],
+        },
+      });
+
+      // Should have content metrics in _meta
+      expect(response.result._meta).toBeDefined();
+      expect(response.result._meta.contentMetrics).toBeDefined();
+      expect(response.result._meta.contentMetrics.inputBlocks).toBe(1);
+      expect(response.result._meta.contentMetrics.inputSize).toBeGreaterThan(0);
+      expect(response.result._meta.contentMetrics.outputBlocks).toBeGreaterThan(
+        0
+      );
+      expect(response.result._meta.contentMetrics.outputSize).toBeGreaterThan(
+        0
+      );
+    }, 10000);
+
+    it('should annotate agent message chunks (Phase 3)', async () => {
+      await adapter.processRequest({
+        jsonrpc: '2.0',
+        method: 'session/prompt',
+        id: 'notify-test-8',
+        params: {
+          sessionId,
+          content: [{ type: 'text', text: 'Test annotation' }],
+        },
+      });
+
+      // Should have agent message chunk notifications with annotations
+      const agentChunks = notifications.filter(
+        (n) =>
+          n.method === 'session/update' &&
+          n.params?.update?.sessionUpdate === 'agent_message_chunk'
+      );
+
+      expect(agentChunks.length).toBeGreaterThan(0);
+
+      // Verify first chunk has annotations
+      const firstChunk = agentChunks[0].params?.update?.content;
+      expect(firstChunk).toBeDefined();
+      expect(firstChunk.annotations).toBeDefined();
+      expect(firstChunk.annotations?._meta?.source).toBe('cursor_agent');
+      expect(firstChunk.annotations?.audience).toContain('user');
+      expect(firstChunk.annotations?.lastModified).toBeDefined();
+    }, 10000);
+
+    it('should annotate content with correct categories (Phase 3)', async () => {
+      // Clear notifications for this test
+      notifications = [];
+
+      await adapter.processRequest({
+        jsonrpc: '2.0',
+        method: 'session/prompt',
+        id: 'notify-test-9',
+        params: {
+          sessionId,
+          content: [{ type: 'text', text: 'Text content for category test' }],
+        },
+      });
+
+      // Check user message annotations
+      const userChunks = notifications.filter(
+        (n) =>
+          n.method === 'session/update' &&
+          n.params?.update?.sessionUpdate === 'user_message_chunk'
+      );
+
+      // Should have at least one user message chunk
+      expect(userChunks.length).toBeGreaterThan(0);
+
+      // Text content should be categorized as 'text'
+      const firstUserChunk = userChunks[0]?.params?.update?.content;
+      expect(firstUserChunk).toBeDefined();
+      expect(firstUserChunk.annotations?._meta?.category).toBe('text');
+      expect(firstUserChunk.annotations?._meta?.source).toBe('user_input');
     }, 10000);
   });
 
@@ -905,7 +1035,10 @@ describe('Prompt Turn Integration Tests', () => {
         },
       });
 
-      expect(loadResponse.result).toBeNull();
+      // Per ACP spec: session/load returns LoadSessionResponse with modes and models
+      expect(loadResponse.result).toBeDefined();
+      expect(loadResponse.result.modes).toBeDefined();
+      expect(loadResponse.result.models).toBeDefined();
 
       // Should have received conversation history via notifications
       const historyNotifications = notifications.filter(
@@ -1036,15 +1169,14 @@ describe('Prompt Turn Integration Tests', () => {
       // Per ACP spec: Cursor errors result in stopReason='refusal', not failure
       expect(response.result?.stopReason).toBe('refusal');
 
-      // Should have completed notification (gracefully handled error)
-      const completedNotification = notifications.find(
-        (n) =>
-          n.method === 'session/update' &&
-          n.params?.update?.sessionUpdate === 'tool_call_update' &&
-          n.params?.update?.status === 'completed'
-      );
+      // Should have _meta with error details
+      expect(response.result?._meta?.stopReasonDetails).toBeDefined();
+      expect(response.result?._meta?.stopReasonDetails?.reason).toBe('refusal');
 
-      expect(completedNotification).toBeDefined();
+      // Should have processing time in metadata
+      expect(
+        response.result?._meta?.processingDurationMs
+      ).toBeGreaterThanOrEqual(0);
 
       // Restore
       mockBridge.sendPrompt = originalSendPrompt;

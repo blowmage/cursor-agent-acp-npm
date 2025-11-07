@@ -5,18 +5,8 @@
  * Manages content transformation between ACP format and Cursor CLI format.
  */
 
-import {
-  ProtocolError,
-  type ContentBlock,
-  type TextContentBlock,
-  type CodeContentBlock,
-  type ImageContentBlock,
-  type AudioContentBlock,
-  type EmbeddedResourceContentBlock,
-  type ResourceLinkContentBlock,
-  type Logger,
-  type AdapterConfig,
-} from '../types';
+import type { ContentBlock } from '@agentclientprotocol/sdk';
+import { ProtocolError, type Logger, type AdapterConfig } from '../types';
 
 export interface ContentProcessorOptions {
   config: AdapterConfig;
@@ -55,92 +45,6 @@ export class ContentProcessor {
   }
 
   /**
-   * Normalize content block to ACP spec format
-   * Per ACP spec: text uses 'text', image/audio use 'data'
-   * Handles backward compatibility with old 'value' field
-   */
-  private normalizeContentBlock(block: any): ContentBlock {
-    const normalized = { ...block };
-
-    switch (block.type) {
-      case 'text':
-        // Per ACP spec: use 'text' field
-        if (block.value && !block.text) {
-          normalized.text = block.value;
-        } else if (!block.text && !block.value) {
-          throw new ProtocolError('Text content block missing text field');
-        }
-        // Ensure text field exists
-        if (!normalized.text) {
-          normalized.text = normalized.value || '';
-        }
-        break;
-
-      case 'code':
-        // Code is internal only, keep value
-        if (!block.value) {
-          throw new ProtocolError('Code content block missing value field');
-        }
-        break;
-
-      case 'image':
-        // Per ACP spec: use 'data' field
-        if (block.value && !block.data) {
-          normalized.data = block.value;
-        } else if (!block.data && !block.value) {
-          throw new ProtocolError('Image content block missing data field');
-        }
-        // Ensure data field exists
-        if (!normalized.data) {
-          normalized.data = normalized.value || '';
-        }
-        if (!block.mimeType) {
-          throw new ProtocolError('Image content block missing mimeType field');
-        }
-        break;
-
-      case 'audio':
-        // Per ACP spec: use 'data' field
-        if (!block.data) {
-          throw new ProtocolError('Audio content block missing data field');
-        }
-        if (!block.mimeType) {
-          throw new ProtocolError('Audio content block missing mimeType field');
-        }
-        break;
-
-      case 'resource':
-        // Per ACP spec: embedded resource
-        if (!block.resource) {
-          throw new ProtocolError(
-            'Resource content block missing resource field'
-          );
-        }
-        if (!block.resource.uri) {
-          throw new ProtocolError('Resource missing uri field');
-        }
-        if (!block.resource.text && !block.resource.blob) {
-          throw new ProtocolError(
-            'Resource must have either text or blob field'
-          );
-        }
-        break;
-
-      case 'resource_link':
-        // Per ACP spec: resource link
-        if (!block.uri) {
-          throw new ProtocolError('Resource link missing uri field');
-        }
-        if (!block.name) {
-          throw new ProtocolError('Resource link missing name field');
-        }
-        break;
-    }
-
-    return normalized as ContentBlock;
-  }
-
-  /**
    * Process content blocks for sending to Cursor CLI
    */
   async processContent(blocks: ContentBlock[]): Promise<ProcessedContent> {
@@ -158,10 +62,7 @@ export class ContentProcessor {
         continue;
       }
 
-      // Normalize block format (convert old field names to 'value')
-      const normalizedBlock = this.normalizeContentBlock(block);
-
-      const processedBlock = await this.processContentBlock(normalizedBlock, i);
+      const processedBlock = await this.processContentBlock(block, i);
       processedBlocks.push(processedBlock.value);
 
       metadata.blocks.push({
@@ -197,8 +98,6 @@ export class ContentProcessor {
     switch (block.type) {
       case 'text':
         return this.processTextBlock(block, index);
-      case 'code':
-        return this.processCodeBlock(block, index);
       case 'image':
         return this.processImageBlock(block, index);
       case 'audio':
@@ -220,10 +119,10 @@ export class ContentProcessor {
    * Per ACP spec: uses 'text' field
    */
   private async processTextBlock(
-    block: TextContentBlock,
+    block: Extract<ContentBlock, { type: 'text' }>,
     index: number
   ): Promise<ProcessedContent> {
-    const textContent = block.text || block.value || ''; // Support both new and old format
+    const textContent = block.text;
 
     this.logger.debug('Processing text block', {
       index,
@@ -240,56 +139,6 @@ export class ContentProcessor {
         originalLength: textContent.length,
         sanitized: value !== textContent,
         annotations: block.annotations,
-        ...(block.metadata || {}),
-      },
-    };
-  }
-
-  /**
-   * Process code content block
-   */
-  private async processCodeBlock(
-    block: CodeContentBlock,
-    index: number
-  ): Promise<ProcessedContent> {
-    this.logger.debug('Processing code block', {
-      index,
-      language: block.language,
-      length: block.value.length,
-      filename: block.filename,
-    });
-
-    // Format code block with language hints
-    let value = '';
-
-    if (block.filename) {
-      value += `# File: ${block.filename}\n`;
-    }
-
-    if (block.language) {
-      value += `\`\`\`${block.language}\n`;
-    } else {
-      value += '```\n';
-    }
-
-    value += block.value;
-
-    if (!value.endsWith('\n')) {
-      value += '\n';
-    }
-
-    value += '```';
-
-    return {
-      value,
-      metadata: {
-        language: block.language,
-        filename: block.filename,
-        codeLength: block.value.length,
-        hasLanguageHint: Boolean(block.language),
-        hasFilename: Boolean(block.filename),
-        annotations: block.annotations,
-        ...(block.metadata || {}),
       },
     };
   }
@@ -299,16 +148,15 @@ export class ContentProcessor {
    * Per ACP spec: uses 'data' field
    */
   private async processImageBlock(
-    block: ImageContentBlock,
+    block: Extract<ContentBlock, { type: 'image' }>,
     index: number
   ): Promise<ProcessedContent> {
-    const imageData = block.data || block.value || ''; // Support both new and old format
+    const imageData = block.data;
 
     this.logger.debug('Processing image block', {
       index,
       mimeType: block.mimeType,
       dataLength: imageData.length,
-      filename: block.filename,
       uri: block.uri,
       hasAnnotations: Boolean(block.annotations),
     });
@@ -321,9 +169,7 @@ export class ContentProcessor {
     // Format image reference for Cursor CLI
     let value = '';
 
-    if (block.filename) {
-      value += `# Image: ${block.filename}\n`;
-    } else if (block.uri) {
+    if (block.uri) {
       value += `# Image: ${block.uri}\n`;
     } else {
       value += `# Image (${block.mimeType})\n`;
@@ -340,12 +186,10 @@ export class ContentProcessor {
       value,
       metadata: {
         mimeType: block.mimeType,
-        filename: block.filename,
         uri: block.uri,
         dataSize: imageData.length,
         isValidBase64: true,
         annotations: block.annotations,
-        ...(block.metadata || {}),
       },
     };
   }
@@ -355,7 +199,7 @@ export class ContentProcessor {
    * Per ACP spec: Audio data for transcription or analysis
    */
   private async processAudioBlock(
-    block: AudioContentBlock,
+    block: Extract<ContentBlock, { type: 'audio' }>,
     index: number
   ): Promise<ProcessedContent> {
     this.logger.debug('Processing audio block', {
@@ -392,7 +236,7 @@ export class ContentProcessor {
    * Per ACP spec: Preferred way to include context (e.g., file contents)
    */
   private async processResourceBlock(
-    block: EmbeddedResourceContentBlock,
+    block: Extract<ContentBlock, { type: 'resource' }>,
     index: number
   ): Promise<ProcessedContent> {
     const { uri, mimeType } = block.resource;
@@ -441,7 +285,7 @@ export class ContentProcessor {
    * Per ACP spec: Reference to agent-accessible resources
    */
   private async processResourceLinkBlock(
-    block: ResourceLinkContentBlock,
+    block: Extract<ContentBlock, { type: 'resource_link' }>,
     index: number
   ): Promise<ProcessedContent> {
     this.logger.debug('Processing resource link block', {
@@ -464,14 +308,14 @@ export class ContentProcessor {
     if (block.mimeType) {
       value += `Type: ${block.mimeType}\n`;
     }
-    if (block.size !== undefined) {
+    if (block.size !== undefined && block.size !== null) {
       value += `Size: ${this.formatDataSize(block.size)}\n`;
     }
 
     return {
       value,
       metadata: {
-        uri: block.uri,
+        uri: block.uri ?? undefined,
         name: block.name,
         mimeType: block.mimeType,
         title: block.title,
@@ -548,10 +392,10 @@ export class ContentProcessor {
 
     // If we're in a code block but it wasn't closed, treat remaining as code
     if (state.inCodeBlock && state.accumulatedContent.trim()) {
+      const language = state.codeLanguage || '';
       result = {
-        type: 'code',
-        value: state.accumulatedContent,
-        ...(state.codeLanguage && { language: state.codeLanguage }),
+        type: 'text',
+        text: `\`\`\`${language}\n${state.accumulatedContent}\n\`\`\``,
       };
     } else if (state.accumulatedContent.trim()) {
       // Flush any remaining text
@@ -666,7 +510,6 @@ export class ContentProcessor {
             return {
               type: 'text',
               text: imageText,
-              metadata: { isImageReference: true },
             };
           }
         }
@@ -727,11 +570,11 @@ export class ContentProcessor {
           const afterCode = accumulated.substring(closingIndex + 3).trimStart();
 
           if (codeContent.length > 0 || closingIndex > 0) {
-            // Complete code block found
+            // Complete code block found - convert to text with code formatting
+            const language = state.codeLanguage || '';
             const result: ContentBlock = {
-              type: 'code',
-              value: codeContent,
-              ...(state.codeLanguage && { language: state.codeLanguage }),
+              type: 'text',
+              text: `\`\`\`${language}\n${codeContent}\n\`\`\``,
             };
 
             // Reset state - remaining content will be processed in next chunk
@@ -833,69 +676,38 @@ export class ContentProcessor {
   }
 
   /**
-   * Parse code section
+   * Parse code section - returns as text with code formatting
    */
-  private parseCodeSection(section: string): CodeContentBlock {
-    const lines = section.split('\n');
-    const firstLine = lines[0];
-    if (!firstLine) {
-      return { type: 'code', value: '' };
-    }
-
-    const language = firstLine.substring(3).trim() || undefined;
-    const code = lines.slice(1, -1).join('\n'); // Remove first and last lines (```)
-
-    const result: CodeContentBlock = {
-      type: 'code',
-      value: code,
-      ...(language && { language }),
+  private parseCodeSection(section: string): ContentBlock {
+    // Return the code section as-is (already formatted with ```)
+    return {
+      type: 'text',
+      text: section,
     };
-
-    return result;
   }
 
   /**
    * Parse file section
    */
   private parseFileSection(section: string): ContentBlock {
-    const lines = section.split('\n');
-    const firstLine = lines[0];
-    if (!firstLine) {
-      return { type: 'text', text: '' };
-    }
-
-    const filename = firstLine.replace('# File:', '').trim();
-
-    const codeStartIndex = lines.findIndex((line) =>
-      line.trim().startsWith('```')
-    );
-    if (codeStartIndex >= 1) {
-      // File contains code
-      const codeSection = lines.slice(codeStartIndex).join('\n');
-      const codeBlock = this.parseCodeSection(codeSection);
-      return {
-        ...codeBlock,
-        filename,
-      };
-    }
-    // File header only - will be combined with following code block in post-processing
+    // Return file section as text (SDK ContentBlock doesn't support custom fields)
     return {
       type: 'text',
-      text: '',
-      metadata: { filename },
+      text: section,
     };
   }
 
   /**
    * Parse image section
    */
-  private parseImageSection(section: string): TextContentBlock {
+  private parseImageSection(
+    section: string
+  ): Extract<ContentBlock, { type: 'text' }> {
     // For now, treat image sections as text descriptions
     // In a real implementation, you might extract base64 data
     return {
       type: 'text',
       text: section,
-      metadata: { isImageReference: true },
     };
   }
 
@@ -950,13 +762,10 @@ export class ContentProcessor {
 
       switch (block.type) {
         case 'text':
-          stats.totalSize += (block.text || block.value || '').length;
-          break;
-        case 'code':
-          stats.totalSize += block.value.length;
+          stats.totalSize += block.text.length;
           break;
         case 'image':
-          stats.totalSize += (block.data || block.value || '').length;
+          stats.totalSize += block.data.length;
           break;
         case 'audio':
           stats.totalSize += block.data.length;
@@ -1004,6 +813,8 @@ export class ContentProcessor {
 
   /**
    * Validate individual content block
+   * Per ACP SDK: Only text, image, audio, resource, resource_link are valid
+   * Note: diff and terminal are ToolCallContent types, NOT ContentBlock types
    */
   private validateContentBlock(block: any, index: number): string[] {
     const errors: string[] = [];
@@ -1020,32 +831,20 @@ export class ContentProcessor {
 
     switch (block.type) {
       case 'text':
-        // Per ACP spec: text content uses 'text' field (accept 'value' for backward compatibility)
-        if (typeof block.text !== 'string' && typeof block.value !== 'string') {
+        // Per ACP spec: text content uses 'text' field
+        if (typeof block.text !== 'string') {
           errors.push(
             `Block ${index}: text content must be a string (use 'text' field)`
           );
         }
         break;
-      case 'code':
-        if (typeof block.value !== 'string') {
-          errors.push(`Block ${index}: value content must be a string`);
-        }
-        if (block.language && typeof block.language !== 'string') {
-          errors.push(`Block ${index}: language must be a string`);
-        }
-        if (block.filename && typeof block.filename !== 'string') {
-          errors.push(`Block ${index}: filename must be a string`);
-        }
-        break;
       case 'image': {
-        // Per ACP spec: image content uses 'data' field (accept 'value' for backward compatibility)
-        const imageData = block.data || block.value;
-        if (typeof imageData !== 'string') {
+        // Per ACP spec: image content uses 'data' field
+        if (typeof block.data !== 'string') {
           errors.push(
             `Block ${index}: data must be a string (use 'data' field)`
           );
-        } else if (!this.isValidBase64(imageData)) {
+        } else if (!this.isValidBase64(block.data)) {
           errors.push(`Block ${index}: data must be valid base64`);
         }
         if (typeof block.mimeType !== 'string') {
@@ -1053,8 +852,13 @@ export class ContentProcessor {
             `Block ${index}: mimeType is required and must be a string`
           );
         }
-        if (block.filename && typeof block.filename !== 'string') {
-          errors.push(`Block ${index}: filename must be a string`);
+        // Validate optional uri field
+        if (
+          block.uri !== undefined &&
+          block.uri !== null &&
+          typeof block.uri !== 'string'
+        ) {
+          errors.push(`Block ${index}: uri must be a string or null`);
         }
         break;
       }
@@ -1088,6 +892,20 @@ export class ContentProcessor {
               `Block ${index}: resource must have either text or blob field`
             );
           }
+          // Validate optional mimeType
+          if (
+            block.resource.mimeType !== undefined &&
+            block.resource.mimeType !== null &&
+            typeof block.resource.mimeType !== 'string'
+          ) {
+            errors.push(
+              `Block ${index}: resource.mimeType must be a string or null`
+            );
+          }
+          // Validate base64 blob
+          if (hasBlob && !this.isValidBase64(block.resource.blob)) {
+            errors.push(`Block ${index}: resource.blob must be valid base64`);
+          }
         }
         break;
       case 'resource_link':
@@ -1098,9 +916,106 @@ export class ContentProcessor {
         if (typeof block.name !== 'string') {
           errors.push(`Block ${index}: name is required and must be a string`);
         }
+        // Validate optional fields
+        if (
+          block.title !== undefined &&
+          block.title !== null &&
+          typeof block.title !== 'string'
+        ) {
+          errors.push(`Block ${index}: title must be a string or null`);
+        }
+        if (
+          block.description !== undefined &&
+          block.description !== null &&
+          typeof block.description !== 'string'
+        ) {
+          errors.push(`Block ${index}: description must be a string or null`);
+        }
+        if (
+          block.mimeType !== undefined &&
+          block.mimeType !== null &&
+          typeof block.mimeType !== 'string'
+        ) {
+          errors.push(`Block ${index}: mimeType must be a string or null`);
+        }
+        if (
+          block.size !== undefined &&
+          block.size !== null &&
+          typeof block.size !== 'number'
+        ) {
+          errors.push(`Block ${index}: size must be a number or null`);
+        }
         break;
       default:
-        errors.push(`Block ${index}: unknown content type '${block.type}'`);
+        errors.push(
+          `Block ${index}: unknown content type '${block.type}' (valid types: text, image, audio, resource, resource_link)`
+        );
+    }
+
+    // Validate annotations if present
+    if (block.annotations) {
+      errors.push(...this.validateAnnotations(block.annotations, index));
+    }
+
+    return errors;
+  }
+
+  /**
+   * Validate annotations on content blocks
+   * Per ACP SDK: Annotations have audience, priority, lastModified
+   */
+  private validateAnnotations(annotations: any, index: number): string[] {
+    const errors: string[] = [];
+
+    if (!annotations || typeof annotations !== 'object') {
+      return errors; // null/undefined is valid
+    }
+
+    // Validate audience (must be array of 'user' or 'assistant')
+    if (annotations.audience !== undefined && annotations.audience !== null) {
+      if (!Array.isArray(annotations.audience)) {
+        errors.push(
+          `Block ${index}: annotations.audience must be an array or null`
+        );
+      } else {
+        for (const role of annotations.audience) {
+          if (role !== 'user' && role !== 'assistant') {
+            errors.push(
+              `Block ${index}: annotations.audience must contain only 'user' or 'assistant'`
+            );
+            break;
+          }
+        }
+      }
+    }
+
+    // Validate lastModified (ISO 8601 timestamp)
+    if (
+      annotations.lastModified !== undefined &&
+      annotations.lastModified !== null
+    ) {
+      if (typeof annotations.lastModified !== 'string') {
+        errors.push(
+          `Block ${index}: annotations.lastModified must be a string or null`
+        );
+      } else if (isNaN(Date.parse(annotations.lastModified))) {
+        errors.push(
+          `Block ${index}: annotations.lastModified must be a valid ISO 8601 timestamp`
+        );
+      }
+    }
+
+    // Validate priority (must be non-negative number)
+    if (annotations.priority !== undefined && annotations.priority !== null) {
+      if (typeof annotations.priority !== 'number') {
+        errors.push(
+          `Block ${index}: annotations.priority must be a number or null`
+        );
+      } else if (annotations.priority < 0) {
+        errors.push(
+          `Block ${index}: annotations.priority must be non-negative`
+        );
+      }
     }
 
     return errors;
@@ -1116,30 +1031,7 @@ export class ContentProcessor {
       const block = blocks[i];
 
       // Check if this is a text block that looks like a file header
-      if (
-        block &&
-        block.type === 'text' &&
-        block.metadata?.['filename'] &&
-        i + 1 < blocks.length &&
-        blocks[i + 1] &&
-        blocks[i + 1]!.type === 'code'
-      ) {
-        // Extract and validate filename
-        const filename = block.metadata['filename'];
-        if (typeof filename === 'string') {
-          // Combine the file header with the following code block
-          const codeBlock = blocks[i + 1] as CodeContentBlock;
-          const result: CodeContentBlock = {
-            ...codeBlock,
-            filename,
-          };
-          processedBlocks.push(result);
-          i++; // Skip the next block since we've combined it
-        } else {
-          // Filename exists but isn't a string - push blocks separately
-          processedBlocks.push(block);
-        }
-      } else if (block) {
+      if (block) {
         processedBlocks.push(block);
       }
     }

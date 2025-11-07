@@ -5,13 +5,17 @@
  * This module manages the core conversation flow between ACP clients and Cursor CLI.
  */
 
+import type {
+  Request,
+  Request1,
+  ContentBlock,
+  PromptRequest,
+  PromptResponse,
+} from '@agentclientprotocol/sdk';
+import type { Error as JsonRpcError } from '@agentclientprotocol/sdk';
 import {
   ProtocolError,
   SessionError,
-  type AcpRequest,
-  type AcpResponse,
-  type SessionPromptParams,
-  type ContentBlock,
   type ConversationMessage,
   type StreamChunk,
   type StreamProgress,
@@ -22,12 +26,26 @@ import type { SessionManager } from '../session/manager';
 import type { CursorCliBridge } from '../cursor/cli-bridge';
 import { ContentProcessor } from './content';
 
+// Stop reason constants per ACP spec
+// These are the only valid values for PromptResponse.stopReason
+const STOP_REASON = {
+  END_TURN: 'end_turn' as const,
+  MAX_TOKENS: 'max_tokens' as const,
+  MAX_TURN_REQUESTS: 'max_turn_requests' as const,
+  REFUSAL: 'refusal' as const,
+  CANCELLED: 'cancelled' as const,
+} satisfies Record<string, PromptResponse['stopReason']>;
+
 export interface PromptHandlerOptions {
   sessionManager: SessionManager;
   cursorBridge: CursorCliBridge;
   config: AdapterConfig;
   logger: Logger;
-  sendNotification: (notification: import('../types').AcpNotification) => void;
+  sendNotification: (notification: {
+    jsonrpc: '2.0';
+    method: string;
+    params?: any;
+  }) => void;
 }
 
 export interface StreamOptions {
@@ -35,6 +53,47 @@ export interface StreamOptions {
   chunkSize?: number;
   progressCallback?: (progress: StreamProgress) => void;
 }
+
+// Plan support
+export interface PlanEntry {
+  id: string;
+  title: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'failed';
+  description?: string;
+}
+
+// Prompt processing configuration
+export interface PromptProcessingConfig {
+  echoUserMessages?: boolean; // Echo user messages via user_message_chunk
+  sendPlan?: boolean; // Send plan notifications (if multi-step processing)
+  collectDetailedMetrics?: boolean; // Collect comprehensive metrics
+  annotateContent?: boolean; // Add annotations to content blocks
+  markInternalContent?: boolean; // Mark assistant-only content
+}
+
+// Content annotation options
+export interface ContentAnnotationOptions {
+  priority?: number; // 1-5, higher = more important
+  audience?: Array<'user' | 'assistant'>; // Who should see this content
+  confidence?: number; // 0-1, confidence score
+  source?: string; // Content source identifier
+  category?: string; // Content category (e.g., 'code', 'explanation', 'error')
+}
+
+// Tool call lifecycle support
+export interface ToolCallInfo {
+  id: string;
+  kind: 'filesystem' | 'terminal' | 'other';
+  title: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'failed';
+  rawInput?: Record<string, any>;
+  rawOutput?: Record<string, any>;
+  content?: ContentBlock[];
+}
+
+// Note: PromptMetrics interface removed as it's not currently used.
+// When detailed metrics collection is implemented, define the structure inline
+// or create a new interface. See PROMPT_TURN_IMPROVEMENTS_IMPLEMENTED.md for details.
 
 export class PromptHandler {
   private readonly sessionManager: SessionManager;
@@ -50,9 +109,19 @@ export class PromptHandler {
     string,
     Set<AbortController>
   >();
-  private readonly sendNotification: (
-    notification: import('../types').AcpNotification
-  ) => void;
+  private readonly sendNotification: (notification: {
+    jsonrpc: '2.0';
+    method: string;
+    params?: any;
+  }) => void;
+  // Processing configuration
+  private readonly processingConfig: PromptProcessingConfig = {
+    echoUserMessages: true,
+    sendPlan: false, // Disabled by default (requires multi-step planning)
+    collectDetailedMetrics: true,
+    annotateContent: true, // Enabled by default
+    markInternalContent: false, // Disabled (most content is user-facing)
+  };
 
   constructor(options: PromptHandlerOptions) {
     this.sessionManager = options.sessionManager;
@@ -69,8 +138,8 @@ export class PromptHandler {
   /**
    * Returns a random element from an array
    */
-  private getRandomTitle(): string {
-    const titles = [
+  private getRandomProcessingText(): string {
+    const texts = [
       'Crunching the numbers (and my will to live)...',
       'Hold on, consulting the magic 8-ball...',
       'Doing the thing...',
@@ -89,15 +158,239 @@ export class PromptHandler {
       'Doing some wizardry...',
       'Making the computers think harder...',
     ];
-    return titles[Math.floor(Math.random() * titles.length)]!;
+    return texts[Math.floor(Math.random() * texts.length)]!;
   }
+
+  /**
+   * Determine the appropriate stop reason based on execution context
+   * Per ACP spec: Returns one of 5 valid stop reasons
+   */
+  private determineStopReason(
+    error: Error | null,
+    aborted: boolean,
+    responseMetadata?: Record<string, any>
+  ): PromptResponse['stopReason'] {
+    // Cancelled by client via session/cancel
+    if (aborted) {
+      return STOP_REASON.CANCELLED;
+    }
+
+    // Check for token limit reached from Cursor response
+    if (
+      responseMetadata?.['reason'] === 'max_tokens' ||
+      responseMetadata?.['tokenLimitReached']
+    ) {
+      return STOP_REASON.MAX_TOKENS;
+    }
+
+    // Check for turn limit reached from Cursor response
+    if (
+      responseMetadata?.['reason'] === 'max_turn_requests' ||
+      responseMetadata?.['turnLimitReached']
+    ) {
+      return STOP_REASON.MAX_TURN_REQUESTS;
+    }
+
+    // Explicit refusal or error occurred
+    if (error || responseMetadata?.['refused'] || responseMetadata?.['error']) {
+      return STOP_REASON.REFUSAL;
+    }
+
+    // Normal completion
+    return STOP_REASON.END_TURN;
+  }
+
+  /**
+   * Echo user message back to client
+   * Per ACP spec: Agent SHOULD echo user messages via user_message_chunk
+   */
+  private echoUserMessage(sessionId: string, content: ContentBlock[]): void {
+    if (!this.processingConfig.echoUserMessages) {
+      return;
+    }
+
+    this.logger.debug('Echoing user message', {
+      sessionId,
+      blocks: content.length,
+    });
+
+    for (const block of content) {
+      // Annotate user content
+      const annotationOptions = this.getDefaultAnnotations(block.type, true);
+      const annotatedBlock = this.annotateContentBlock(
+        block,
+        annotationOptions
+      );
+
+      this.sendNotification({
+        jsonrpc: '2.0',
+        method: 'session/update',
+        params: {
+          sessionId,
+          update: {
+            sessionUpdate: 'user_message_chunk',
+            content: annotatedBlock,
+          },
+        },
+      });
+    }
+  }
+
+  /**
+   * Calculate total content size for metrics
+   */
+  private calculateContentSize(blocks: ContentBlock[]): number {
+    let totalSize = 0;
+    for (const block of blocks) {
+      totalSize += this.getContentSize(block);
+    }
+    return totalSize;
+  }
+
+  /**
+   * Annotate content block with metadata
+   * Adds annotations per ACP spec for content visibility, priority, etc.
+   */
+  private annotateContentBlock(
+    block: ContentBlock,
+    options: ContentAnnotationOptions
+  ): ContentBlock {
+    if (!this.processingConfig.annotateContent) {
+      return block;
+    }
+
+    const annotations: Record<string, any> = block.annotations
+      ? { ...block.annotations }
+      : {};
+
+    // Add audience (user vs assistant)
+    if (options['audience']) {
+      annotations['audience'] = options['audience'];
+    } else if (this.processingConfig.markInternalContent) {
+      // Default to user-visible unless marked as internal
+      annotations['audience'] = ['user'];
+    }
+
+    // Add priority (1-5)
+    if (options['priority'] !== undefined) {
+      annotations['priority'] = Math.max(1, Math.min(5, options['priority']));
+    }
+
+    // Add timestamp
+    annotations['lastModified'] = new Date().toISOString();
+
+    // Add custom metadata
+    const meta: Record<string, any> = annotations['_meta'] || {};
+
+    if (options['confidence'] !== undefined) {
+      meta['confidence'] = Math.max(0, Math.min(1, options['confidence']));
+    }
+
+    if (options['source']) {
+      meta['source'] = options['source'];
+    }
+
+    if (options['category']) {
+      meta['category'] = options['category'];
+    }
+
+    if (Object.keys(meta).length > 0) {
+      annotations['_meta'] = meta;
+    }
+
+    return {
+      ...block,
+      annotations: Object.keys(annotations).length > 0 ? annotations : null,
+    };
+  }
+
+  /**
+   * Create annotation options based on content type and context
+   */
+  private getDefaultAnnotations(
+    blockType: string,
+    isUserContent: boolean
+  ): ContentAnnotationOptions {
+    const options: ContentAnnotationOptions = {
+      source: isUserContent ? 'user_input' : 'cursor_agent',
+      audience: isUserContent ? ['user', 'assistant'] : ['user'],
+    };
+
+    // Add category based on content type
+    switch (blockType) {
+      case 'text':
+        options.category = 'text';
+        break;
+      case 'image':
+        options.category = 'media';
+        break;
+      case 'resource':
+        options.category = 'resource';
+        break;
+      case 'diff':
+        options.category = 'code';
+        break;
+      default:
+        options.category = 'other';
+    }
+
+    return options;
+  }
+
+  // Note: Tool call lifecycle methods, plan notifications, and detailed metrics
+  // collection are infrastructure ready for future implementation. See
+  // PromptProcessingConfig for configuration options and
+  // PROMPT_TURN_PHASE3_IMPLEMENTED.md for usage examples.
+  //
+  // Tool call lifecycle example (currently not used):
+  //
+  // private reportToolCall(sessionId: string, toolCall: ToolCallInfo): void {
+  //   this.sendNotification({
+  //     jsonrpc: '2.0',
+  //     method: 'session/update',
+  //     params: {
+  //       sessionId,
+  //       update: {
+  //         sessionUpdate: 'tool_call',
+  //         toolCallId: toolCall.id,
+  //         kind: toolCall.kind,
+  //         title: toolCall.title,
+  //         status: toolCall.status,
+  //         ...(toolCall.rawInput && { rawInput: toolCall.rawInput }),
+  //         ...(toolCall.content && { content: toolCall.content }),
+  //       },
+  //     },
+  //   });
+  // }
+  //
+  // private updateToolCall(sessionId: string, toolCallId: string, update: {...}): void {
+  //   this.sendNotification({
+  //     jsonrpc: '2.0',
+  //     method: 'session/update',
+  //     params: {
+  //       sessionId,
+  //       update: {
+  //         sessionUpdate: 'tool_call_update',
+  //         toolCallId,
+  //         ...(update.status && { status: update.status }),
+  //         ...(update.rawOutput && { rawOutput: update.rawOutput }),
+  //         ...(update.content && { content: update.content }),
+  //       },
+  //     },
+  //   });
+  // }
 
   /**
    * Process a session/prompt request
    * Per ACP spec: Process prompt and return stopReason when complete.
    * Send session/update notifications during processing.
    */
-  async processPrompt(request: AcpRequest): Promise<AcpResponse> {
+  async processPrompt(request: Request | Request1): Promise<{
+    jsonrpc: '2.0';
+    id: string | number | null;
+    result?: any | null;
+    error?: JsonRpcError;
+  }> {
     const { id, params } = request;
 
     try {
@@ -115,37 +408,43 @@ export class PromptHandler {
       const sessionId = promptParams.sessionId;
       const existingQueue = this.sessionQueues.get(sessionId);
 
-      const processRequest = async (): Promise<AcpResponse> => {
+      const processRequest = async (): Promise<{
+        jsonrpc: '2.0';
+        id: string | number | null;
+        result?: any | null;
+        error?: JsonRpcError;
+      }> => {
+        // Track timing for metrics
+        const startTime = Date.now();
+
         // Load session to ensure it exists and is valid
-        await this.sessionManager.loadSession(sessionId);
+        const session = await this.sessionManager.loadSession(sessionId);
 
         // Mark session as processing to prevent cleanup during long-running operations
         this.sessionManager.markSessionProcessing(sessionId);
 
-        // Create a unique tool call ID for tracking this prompt processing
-        const processingToolCallId = `processing_${id}`;
         let heartbeatCount = 0;
+        const processingText = this.getRandomProcessingText();
 
-        // Send initial tool call to indicate processing has started
-        // Per ACP spec: Tool calls provide real-time feedback about execution progress
-        // This prevents the client from assuming the agent is unresponsive
+        // Send initial thought chunk to indicate processing has started
+        // Per ACP spec: agent_thought_chunk is for progress updates
         this.sendNotification({
           jsonrpc: '2.0',
           method: 'session/update',
           params: {
             sessionId: promptParams.sessionId,
             update: {
-              sessionUpdate: 'tool_call',
-              toolCallId: processingToolCallId,
-              title: this.getRandomTitle(),
-              kind: 'other',
-              status: 'in_progress',
+              sessionUpdate: 'agent_thought_chunk',
+              content: {
+                type: 'text',
+                text: processingText,
+              },
             },
           },
         });
 
         // Set up periodic heartbeat to keep client aware of ongoing activity
-        // Updates the tool call with progress messages every 12 seconds
+        // Sends agent_thought_chunk progress messages every 12 seconds
         // Also updates session activity to prevent expiration during long-running operations
         const heartbeatInterval = setInterval(async () => {
           heartbeatCount++;
@@ -165,71 +464,117 @@ export class PromptHandler {
             return;
           }
 
+          // Send progress update via agent_thought_chunk
           this.sendNotification({
             jsonrpc: '2.0',
             method: 'session/update',
             params: {
               sessionId: promptParams.sessionId,
               update: {
-                sessionUpdate: 'tool_call_update',
-                toolCallId: processingToolCallId,
-                title: `Processing your request... (${elapsed}s)`,
-                status: 'in_progress',
+                sessionUpdate: 'agent_thought_chunk',
+                content: {
+                  type: 'text',
+                  text: `${processingText} (${elapsed}s)`,
+                },
               },
             },
           });
         }, 12000); // 12 seconds
 
         try {
-          // Process and AWAIT completion to get stopReason
+          // Process and AWAIT completion to get stopReason and metadata
           // This sends additional session/update notifications during processing
-          let stopReason: string;
+          let processingError: Error | null = null;
+          let responseMetadata: Record<string, any> = {};
+          let aborted = false;
 
-          if (promptParams.stream) {
-            stopReason = await this.processStreamingPromptAsync(
-              promptParams,
-              id.toString()
-            );
-          } else {
-            stopReason = await this.processRegularPromptAsync(promptParams);
+          try {
+            if (promptParams.stream) {
+              const result = await this.processStreamingPromptAsync(
+                promptParams,
+                (id ?? 'unknown').toString()
+              );
+              responseMetadata = result.metadata || {};
+              aborted = result.aborted || false;
+            } else {
+              const result = await this.processRegularPromptAsync(promptParams);
+              responseMetadata = result.metadata || {};
+            }
+          } catch (err) {
+            processingError =
+              err instanceof Error ? err : new Error(String(err));
+            // Don't rethrow - we'll determine the appropriate stop reason
           }
 
-          // Mark the processing tool call as completed
-          this.sendNotification({
-            jsonrpc: '2.0',
-            method: 'session/update',
-            params: {
-              sessionId: promptParams.sessionId,
-              update: {
-                sessionUpdate: 'tool_call_update',
-                toolCallId: processingToolCallId,
-                title: 'Request completed',
-                status: 'completed',
-              },
+          // Determine the appropriate stop reason based on execution context
+          const stopReason = this.determineStopReason(
+            processingError,
+            aborted,
+            responseMetadata
+          );
+
+          // Calculate processing metrics
+          const endTime = Date.now();
+          const processingDurationMs = endTime - startTime;
+
+          // Build proper PromptResponse with rich metadata
+          const response: PromptResponse = {
+            stopReason,
+            _meta: {
+              // Timing information
+              processingStartedAt: new Date(startTime).toISOString(),
+              processingEndedAt: new Date(endTime).toISOString(),
+              processingDurationMs,
+
+              // Session information
+              sessionId,
+              ...(session.state?.messageCount !== undefined && {
+                sessionMessageCount: session.state.messageCount,
+              }),
+
+              // Processing details
+              streaming: promptParams.stream,
+              heartbeatsCount: heartbeatCount,
+
+              // Content metrics (if collected)
+              ...(responseMetadata['contentMetrics'] && {
+                contentMetrics: responseMetadata['contentMetrics'],
+              }),
+
+              // Stop reason details (if not normal completion)
+              ...(stopReason !== STOP_REASON.END_TURN && {
+                stopReasonDetails: {
+                  reason: stopReason,
+                  ...(processingError && {
+                    errorMessage: processingError.message,
+                    errorName: processingError.name,
+                  }),
+                  ...responseMetadata,
+                },
+              }),
             },
-          });
+          };
+
+          // If there was an error but we're returning a response, log it
+          if (processingError) {
+            this.logger.warn('Prompt processing completed with error', {
+              sessionId,
+              stopReason,
+              error: processingError.message,
+            });
+          }
 
           return {
             jsonrpc: '2.0' as const,
-            id,
-            result: {
-              stopReason,
-            },
+            id: id!,
+            result: response,
           };
         } catch (error) {
-          // Mark the processing tool call as failed if an error occurs
-          this.sendNotification({
-            jsonrpc: '2.0',
-            method: 'session/update',
-            params: {
-              sessionId: promptParams.sessionId,
-              update: {
-                sessionUpdate: 'tool_call_update',
-                toolCallId: processingToolCallId,
-                title: 'Processing failed',
-                status: 'failed',
-              },
-            },
+          // This catch block is for unexpected errors during the try block above
+          // (not from processPromptAsync, which we already caught)
+          this.logger.error('Unexpected error in prompt processing', {
+            sessionId,
+            error: error instanceof Error ? error.message : String(error),
           });
           throw error;
         } finally {
@@ -283,9 +628,16 @@ export class PromptHandler {
         requestId: id,
       });
 
-      return {
+      return <
+        {
+          jsonrpc: '2.0';
+          id: string | number | null;
+          result?: any | null;
+          error?: JsonRpcError;
+        }
+      >{
         jsonrpc: '2.0',
-        id,
+        id: id!,
         error: {
           code: error instanceof SessionError ? -32001 : -32603,
           message: error instanceof Error ? error.message : 'Unknown error',
@@ -301,11 +653,16 @@ export class PromptHandler {
   /**
    * Process a regular (non-streaming) prompt asynchronously
    * Sends session/update notifications as content is processed
-   * Returns stopReason when complete
+   * Returns result with metadata
    */
   private async processRegularPromptAsync(
-    params: SessionPromptParams
-  ): Promise<string> {
+    params: Omit<PromptRequest, 'prompt'> & {
+      sessionId: string;
+      content: ContentBlock[];
+      stream?: boolean;
+      metadata?: Record<string, any>;
+    }
+  ): Promise<{ metadata: Record<string, any> }> {
     const { sessionId, content, metadata } = params;
 
     try {
@@ -329,6 +686,9 @@ export class PromptHandler {
       };
 
       await this.sessionManager.addMessage(sessionId, userMessage);
+
+      // Echo user message back to client
+      this.echoUserMessage(sessionId, content);
 
       // Process content blocks and prepare for Cursor CLI
       const processedContent =
@@ -365,44 +725,84 @@ export class PromptHandler {
 
       // Send content via session/update notifications (per ACP spec)
       // Each agent_message_chunk contains a single ContentBlock
+      // With annotations
       for (const block of responseContent) {
         const acpContent = this.convertContentBlockToAcp(block);
-        this.sendNotification({
+
+        // Annotate agent content
+        const annotationOptions = this.getDefaultAnnotations(
+          acpContent.type,
+          false
+        );
+        const annotatedContent = this.annotateContentBlock(
+          acpContent,
+          annotationOptions
+        );
+
+        this.sendNotification(<
+          {
+            jsonrpc: '2.0';
+            method: string;
+            params?: any;
+          }
+        >{
           jsonrpc: '2.0',
           method: 'session/update',
           params: {
             sessionId,
             update: {
               sessionUpdate: 'agent_message_chunk',
-              content: acpContent,
+              content: annotatedContent,
             },
           },
         });
       }
 
-      // Return stopReason - the response will include this
-      // No need to send a separate completion notification
+      // Collect detailed metrics if enabled
+      const detailedMetrics = this.processingConfig.collectDetailedMetrics
+        ? {
+            contentMetrics: {
+              inputBlocks: content.length,
+              inputSize: this.calculateContentSize(content),
+              outputBlocks: responseContent.length,
+              outputSize: this.calculateContentSize(responseContent),
+            },
+          }
+        : {};
+
+      // Return metadata - stopReason will be determined by caller
       this.logger.debug('Regular prompt processing complete', { sessionId });
-      return 'end_turn';
+      return {
+        metadata: {
+          messageBlocks: responseContent.length,
+          success: true,
+          ...detailedMetrics,
+        },
+      };
     } catch (error) {
       this.logger.error('Error in regular prompt processing', {
         error,
         sessionId,
       });
-      // Return appropriate stopReason based on error
-      return 'refusal';
+      // Re-throw to let caller determine stop reason
+      throw error;
     }
   }
 
   /**
    * Process a streaming prompt asynchronously
    * Sends session/update notifications as chunks arrive
-   * Returns stopReason when complete
+   * Returns result with metadata and aborted flag
    */
   private async processStreamingPromptAsync(
-    params: SessionPromptParams,
+    params: Omit<PromptRequest, 'prompt'> & {
+      sessionId: string;
+      content: ContentBlock[];
+      stream?: boolean;
+      metadata?: Record<string, any>;
+    },
     requestId: string
-  ): Promise<string> {
+  ): Promise<{ metadata: Record<string, any>; aborted: boolean }> {
     const { sessionId, content, metadata } = params;
 
     // Create abort controller for this stream
@@ -436,6 +836,9 @@ export class PromptHandler {
       };
 
       await this.sessionManager.addMessage(sessionId, userMessage);
+
+      // Echo user message back to client
+      this.echoUserMessage(sessionId, content);
 
       // Process content blocks
       const processedContent =
@@ -472,7 +875,19 @@ export class PromptHandler {
 
               // Send notification immediately for each chunk (per ACP spec)
               // Each agent_message_chunk contains a single ContentBlock
+              // With annotations
               const acpContent = this.convertContentBlockToAcp(contentBlock);
+
+              // Annotate agent content
+              const annotationOptions = this.getDefaultAnnotations(
+                acpContent.type,
+                false
+              );
+              const annotatedContent = this.annotateContentBlock(
+                acpContent,
+                annotationOptions
+              );
+
               this.sendNotification({
                 jsonrpc: '2.0',
                 method: 'session/update',
@@ -480,7 +895,7 @@ export class PromptHandler {
                   sessionId,
                   update: {
                     sessionUpdate: 'agent_message_chunk',
-                    content: acpContent,
+                    content: annotatedContent,
                   },
                 },
               });
@@ -499,14 +914,31 @@ export class PromptHandler {
       if (finalBlock) {
         responseContent.push(finalBlock);
         const acpContent = this.convertContentBlockToAcp(finalBlock);
-        this.sendNotification({
+
+        // Annotate agent content
+        const annotationOptions = this.getDefaultAnnotations(
+          acpContent.type,
+          false
+        );
+        const annotatedContent = this.annotateContentBlock(
+          acpContent,
+          annotationOptions
+        );
+
+        this.sendNotification(<
+          {
+            jsonrpc: '2.0';
+            method: string;
+            params?: any;
+          }
+        >{
           jsonrpc: '2.0',
           method: 'session/update',
           params: {
             sessionId,
             update: {
               sessionUpdate: 'agent_message_chunk',
-              content: acpContent,
+              content: annotatedContent,
             },
           },
         });
@@ -531,10 +963,28 @@ export class PromptHandler {
 
       await this.sessionManager.addMessage(sessionId, assistantMessage);
 
-      // Return stopReason - the response will include this
-      // No need to send a separate completion notification
+      // Collect detailed metrics if enabled
+      const detailedMetrics = this.processingConfig.collectDetailedMetrics
+        ? {
+            contentMetrics: {
+              inputBlocks: content.length,
+              inputSize: this.calculateContentSize(content),
+              outputBlocks: responseContent.length,
+              outputSize: this.calculateContentSize(responseContent),
+            },
+          }
+        : {};
+
+      // Return metadata - stopReason will be determined by caller
       this.logger.debug('Streaming prompt processing complete', { sessionId });
-      return 'end_turn';
+      return {
+        metadata: {
+          messageBlocks: responseContent.length,
+          success: true,
+          ...detailedMetrics,
+        },
+        aborted: false,
+      };
     } catch (error) {
       this.logger.error('Error in streaming prompt processing', {
         error,
@@ -543,11 +993,17 @@ export class PromptHandler {
 
       // Check if cancelled via abort signal
       if (abortController.signal.aborted) {
-        return 'cancelled';
+        return {
+          metadata: {
+            aborted: true,
+            reason: 'User cancelled request',
+          },
+          aborted: true,
+        };
       }
 
-      // Return appropriate stopReason based on error
-      return 'refusal';
+      // Re-throw to let caller determine stop reason
+      throw error;
     } finally {
       // Clean up stream tracking
       this.activeStreams.delete(requestId);
@@ -617,20 +1073,23 @@ export class PromptHandler {
   /**
    * Validate prompt parameters
    */
-  private validatePromptParams(params: any): SessionPromptParams {
+  private validatePromptParams(params: any): Omit<PromptRequest, 'prompt'> & {
+    sessionId: string;
+    content: ContentBlock[];
+    stream?: boolean;
+    metadata?: Record<string, any>;
+  } {
     if (!params || typeof params !== 'object') {
       throw new ProtocolError('Invalid prompt parameters');
     }
 
-    const { sessionId, content, prompt, stream, metadata } = params;
+    const { sessionId, content, stream, metadata } = params;
 
     if (!sessionId || typeof sessionId !== 'string') {
       throw new ProtocolError('sessionId is required and must be a string');
     }
 
-    // Accept both 'content' and 'prompt' field names for compatibility
-    // Zed uses 'prompt', but we normalize it to 'content' internally
-    const contentArray = content || prompt;
+    const contentArray = content;
 
     if (!Array.isArray(contentArray) || contentArray.length === 0) {
       throw new ProtocolError(
@@ -658,7 +1117,9 @@ export class PromptHandler {
   /**
    * Check if content block is valid
    * Per ACP spec: text uses 'text', image/audio use 'data'
-   * Maintains backward compatibility with 'value' field
+   *
+   * Note: 'diff' and 'terminal' are NOT valid ContentBlock types.
+   * They are ToolCallContent types only. See @agentclientprotocol/sdk
    */
   private isValidContentBlock(block: any): block is ContentBlock {
     if (!block || typeof block !== 'object' || !block.type) {
@@ -667,20 +1128,12 @@ export class PromptHandler {
 
     switch (block.type) {
       case 'text':
-        // Per ACP spec: uses 'text' field (or 'value' for backward compatibility)
-        return (
-          typeof block.text === 'string' || typeof block.value === 'string'
-        );
-
-      case 'code':
-        // Internal type: uses 'value' field
-        return typeof block.value === 'string';
-
+        // Per ACP spec: uses 'text' field
+        return typeof block.text === 'string';
       case 'image':
-        // Per ACP spec: uses 'data' field (or 'value' for backward compatibility)
+        // Per ACP spec: uses 'data' field
         return (
-          (typeof block.data === 'string' || typeof block.value === 'string') &&
-          typeof block.mimeType === 'string'
+          typeof block.data === 'string' && typeof block.mimeType === 'string'
         );
 
       case 'audio':
@@ -707,18 +1160,6 @@ export class PromptHandler {
         // Per ACP spec: Resource link
         return typeof block.uri === 'string' && typeof block.name === 'string';
 
-      case 'diff':
-        // Per ACP spec: Diff content for file modifications
-        return (
-          typeof block.path === 'string' &&
-          (block.oldText === null || typeof block.oldText === 'string') &&
-          typeof block.newText === 'string'
-        );
-
-      case 'terminal':
-        // Per ACP spec: Terminal output content
-        return typeof block.terminalId === 'string';
-
       default:
         return false;
     }
@@ -741,29 +1182,14 @@ export class PromptHandler {
       case 'text':
         return {
           type: 'text',
-          text: block.text || block.value || '',
+          text: block.text,
           ...(block.annotations && { annotations: block.annotations }),
         };
-
-      case 'code': {
-        // Per ACP spec: Code is sent as text with language annotation
-        const codeAnnotations = {
-          ...(block.language && { language: block.language }),
-          ...(block.annotations || {}),
-        };
-        return {
-          type: 'text',
-          text: block.value,
-          ...(Object.keys(codeAnnotations).length > 0 && {
-            annotations: codeAnnotations,
-          }),
-        };
-      }
 
       case 'image':
         return {
           type: 'image',
-          data: block.data || block.value || '',
+          data: block.data,
           mimeType: block.mimeType,
           ...(block.uri && { uri: block.uri }),
           ...(block.annotations && { annotations: block.annotations }),
@@ -810,11 +1236,9 @@ export class PromptHandler {
   private getContentSize(block: ContentBlock): number {
     switch (block.type) {
       case 'text':
-        return (block.text || block.value || '').length;
-      case 'code':
-        return block.value.length;
+        return block.text.length;
       case 'image':
-        return (block.data || block.value || '').length;
+        return block.data.length;
       case 'audio':
         return block.data.length;
       case 'resource':

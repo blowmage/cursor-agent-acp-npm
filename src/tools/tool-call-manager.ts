@@ -3,21 +3,30 @@
  *
  * Centralizes tool call tracking and reporting per ACP spec.
  * Manages tool call notifications, permission requests, and state tracking.
+ *
+ * All notifications now use SDK types for full compliance.
  */
+
+import type {
+  ToolKind,
+  ToolCallContent,
+  ToolCallLocation,
+  ToolCallStatus,
+  PermissionOption,
+  SessionNotification,
+  ContentBlock,
+} from '@agentclientprotocol/sdk';
 
 import {
   type Logger,
-  type ToolCallUpdate,
-  type ToolCallStatus,
-  type ToolKind,
-  type ToolCallContent,
-  type ToolCallLocation,
-  type PermissionOption,
   type PermissionOutcome,
   type RequestPermissionParams,
-  type AcpNotification,
 } from '../types';
 
+/**
+ * Internal tracking info for active tool calls
+ * Note: We store SDK-compliant notification structure
+ */
 export interface ToolCallInfo {
   toolCallId: string;
   sessionId: string;
@@ -25,13 +34,18 @@ export interface ToolCallInfo {
   status: ToolCallStatus;
   startTime: Date;
   endTime?: Date;
-  update: ToolCallUpdate;
+  // Store the last notification sent for this tool call
+  lastNotification: SessionNotification;
   cleanupTimeoutId?: NodeJS.Timeout;
 }
 
 export interface ToolCallManagerOptions {
   logger: Logger;
-  sendNotification: (notification: AcpNotification) => void;
+  sendNotification: (notification: {
+    jsonrpc: '2.0';
+    method: string;
+    params?: any;
+  }) => void;
   requestPermission?:
     | ((params: RequestPermissionParams) => Promise<PermissionOutcome>)
     | undefined;
@@ -39,12 +53,17 @@ export interface ToolCallManagerOptions {
 
 export class ToolCallManager {
   private logger: Logger;
-  private sendNotification: (notification: AcpNotification) => void;
+  private sendNotification: (notification: {
+    jsonrpc: '2.0';
+    method: string;
+    params?: any;
+  }) => void;
   private requestPermission:
     | ((params: RequestPermissionParams) => Promise<PermissionOutcome>)
     | undefined;
   private activeToolCalls = new Map<string, ToolCallInfo>();
   private toolCallCounter = 0;
+  private notificationSequence = 0;
 
   constructor(options: ToolCallManagerOptions) {
     this.logger = options.logger;
@@ -63,6 +82,8 @@ export class ToolCallManager {
   /**
    * Report a new tool call to the client
    * Per ACP spec: Send session/update notification with tool_call
+   * Now uses SDK types with _meta support
+   * Defaults to in_progress status
    */
   async reportToolCall(
     sessionId: string,
@@ -76,14 +97,30 @@ export class ToolCallManager {
     }
   ): Promise<string> {
     const toolCallId = this.generateToolCallId(toolName);
+    const now = new Date();
+    const status = options.status || 'in_progress'; // Better default
 
-    const update: ToolCallUpdate = {
-      toolCallId,
-      title: options.title,
-      kind: options.kind,
-      status: options.status || 'pending',
-      ...(options.rawInput && { rawInput: options.rawInput }),
-      ...(options.locations && { locations: options.locations }),
+    // Build SDK-compliant SessionNotification
+    const notification: SessionNotification = {
+      sessionId,
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId,
+        title: options.title,
+        kind: options.kind,
+        status,
+        ...(options.locations && { locations: options.locations }),
+        ...(options.rawInput && { rawInput: options.rawInput }),
+        _meta: {
+          toolName,
+          startTime: now.toISOString(),
+          source: 'tool-call-manager',
+        },
+      },
+      _meta: {
+        timestamp: now.toISOString(),
+        notificationSequence: this.notificationSequence++,
+      },
     };
 
     // Store tool call info
@@ -91,9 +128,9 @@ export class ToolCallManager {
       toolCallId,
       sessionId,
       toolName,
-      status: options.status || 'pending',
-      startTime: new Date(),
-      update,
+      status,
+      startTime: now,
+      lastNotification: notification,
     };
 
     this.activeToolCalls.set(toolCallId, toolCallInfo);
@@ -103,20 +140,14 @@ export class ToolCallManager {
       sessionId,
       toolName,
       kind: options.kind,
-      status: options.status || 'pending',
+      status,
     });
 
-    // Send session/update notification
+    // Send SDK-compliant notification
     this.sendNotification({
       jsonrpc: '2.0',
       method: 'session/update',
-      params: {
-        sessionId,
-        update: {
-          sessionUpdate: 'tool_call',
-          ...update,
-        },
-      },
+      params: notification,
     });
 
     return toolCallId;
@@ -125,6 +156,7 @@ export class ToolCallManager {
   /**
    * Update an existing tool call
    * Per ACP spec: Send session/update notification with tool_call_update
+   * Now uses SDK types with _meta support
    */
   async updateToolCall(
     sessionId: string,
@@ -147,25 +179,17 @@ export class ToolCallManager {
       return;
     }
 
+    const now = new Date();
+
     // Update stored info
     if (updates.status) {
       toolCallInfo.status = updates.status;
 
       // Mark end time if completed or failed
       if (updates.status === 'completed' || updates.status === 'failed') {
-        toolCallInfo.endTime = new Date();
+        toolCallInfo.endTime = now;
       }
     }
-
-    // Merge updates
-    toolCallInfo.update = {
-      ...toolCallInfo.update,
-      ...(updates.title !== undefined && { title: updates.title }),
-      ...(updates.status !== undefined && { status: updates.status }),
-      ...(updates.content !== undefined && { content: updates.content }),
-      ...(updates.locations !== undefined && { locations: updates.locations }),
-      ...(updates.rawOutput !== undefined && { rawOutput: updates.rawOutput }),
-    };
 
     this.logger.debug('Updating tool call', {
       toolCallId,
@@ -174,36 +198,39 @@ export class ToolCallManager {
       updates,
     });
 
-    // Send session/update notification
-    const updatePayload: any = {
+    // Build SDK-compliant update (only include fields being updated)
+    const updatePayload: SessionNotification['update'] = {
       sessionUpdate: 'tool_call_update',
       toolCallId,
+      ...(updates.title !== undefined && { title: updates.title }),
+      ...(updates.status !== undefined && { status: updates.status }),
+      ...(updates.content !== undefined && { content: updates.content }),
+      ...(updates.locations !== undefined && { locations: updates.locations }),
+      ...(updates.rawOutput !== undefined && { rawOutput: updates.rawOutput }),
+      _meta: {
+        updateTime: now.toISOString(),
+        source: 'tool-call-manager',
+      },
     };
 
-    // Only include fields that are being updated (per ACP spec)
-    if (updates.title !== undefined) {
-      updatePayload.title = updates.title;
-    }
-    if (updates.status !== undefined) {
-      updatePayload.status = updates.status;
-    }
-    if (updates.content !== undefined) {
-      updatePayload.content = updates.content;
-    }
-    if (updates.locations !== undefined) {
-      updatePayload.locations = updates.locations;
-    }
-    if (updates.rawOutput !== undefined) {
-      updatePayload.rawOutput = updates.rawOutput;
-    }
+    // Build full notification
+    const notification: SessionNotification = {
+      sessionId,
+      update: updatePayload,
+      _meta: {
+        timestamp: now.toISOString(),
+        notificationSequence: this.notificationSequence++,
+      },
+    };
 
+    // Store last notification
+    toolCallInfo.lastNotification = notification;
+
+    // Send SDK-compliant notification
     this.sendNotification({
       jsonrpc: '2.0',
       method: 'session/update',
-      params: {
-        sessionId,
-        update: updatePayload,
-      },
+      params: notification,
     });
   }
 
@@ -243,9 +270,10 @@ export class ToolCallManager {
     });
 
     try {
+      // Pass the tool call update from the last notification
       const outcome = await this.requestPermission({
         sessionId,
-        toolCall: toolCallInfo.update,
+        toolCall: toolCallInfo.lastNotification.update as any, // Cast for compatibility
         options,
       });
 
@@ -277,7 +305,135 @@ export class ToolCallManager {
   }
 
   /**
+   * Convert ContentBlock diffs (from cursor-tools) to ToolCallContent
+   * Enables rich diff display in clients
+   */
+  convertDiffContent(diffBlocks: ContentBlock[]): ToolCallContent[] {
+    const toolCallContent: ToolCallContent[] = [];
+
+    for (const block of diffBlocks) {
+      if (
+        block.type === 'resource' &&
+        block.resource.mimeType === 'text/x-diff'
+      ) {
+        // Parse unified diff to extract path, old text, new text
+        try {
+          const diffPath = block.resource.uri.replace('diff://', '');
+          // Handle both text and blob resources
+          const diffText = 'text' in block.resource ? block.resource.text : '';
+          const parsed = this.parseUnifiedDiff(diffPath, diffText);
+
+          const diffContent: ToolCallContent = {
+            type: 'diff',
+            path: parsed.path,
+            oldText: parsed.oldText,
+            newText: parsed.newText,
+          };
+
+          // Only add _meta if it exists (for exactOptionalPropertyTypes)
+          if (block.annotations?._meta) {
+            diffContent._meta = block.annotations._meta;
+          }
+
+          toolCallContent.push(diffContent);
+        } catch (error) {
+          // If parsing fails, wrap as regular content
+          this.logger.warn('Failed to parse diff content', { error });
+          toolCallContent.push({
+            type: 'content',
+            content: block,
+          });
+        }
+      } else {
+        // Wrap other content types in content wrapper
+        toolCallContent.push({
+          type: 'content',
+          content: block,
+        });
+      }
+    }
+
+    return toolCallContent;
+  }
+
+  /**
+   * Create terminal content for tool call updates
+   * Enables streaming terminal output to clients
+   *
+   * Usage example:
+   * ```
+   * const content = toolCallManager.createTerminalContent('term-123');
+   * await toolCallManager.updateToolCall(sessionId, toolCallId, { content });
+   * ```
+   */
+  createTerminalContent(terminalId: string): ToolCallContent[] {
+    return [
+      {
+        type: 'terminal',
+        terminalId,
+      },
+    ];
+  }
+
+  /**
+   * Parse unified diff format to extract old/new content
+   * Simple parser - extracts content from unified diff format
+   */
+  private parseUnifiedDiff(
+    path: string,
+    diffText: string
+  ): {
+    path: string;
+    oldText: string | null;
+    newText: string;
+  } {
+    const lines = diffText.split('\n');
+    const oldLines: string[] = [];
+    const newLines: string[] = [];
+    let inHunk = false;
+
+    for (const line of lines) {
+      // Skip diff headers
+      if (line.startsWith('---') || line.startsWith('+++')) {
+        continue;
+      }
+
+      // Start of hunk
+      if (line.startsWith('@@')) {
+        inHunk = true;
+        continue;
+      }
+
+      if (inHunk) {
+        if (line.startsWith('-')) {
+          // Old line (removed)
+          oldLines.push(line.substring(1));
+        } else if (line.startsWith('+')) {
+          // New line (added)
+          newLines.push(line.substring(1));
+        } else if (line.startsWith(' ')) {
+          // Context line (unchanged) - appears in both
+          const contextLine = line.substring(1);
+          oldLines.push(contextLine);
+          newLines.push(contextLine);
+        }
+      }
+    }
+
+    // Determine if this is a new file (no old content)
+    const isNewFile =
+      oldLines.length === 0 || oldLines.every((line) => line.trim() === '');
+
+    return {
+      path,
+      oldText: isNewFile ? null : oldLines.join('\n'),
+      newText: newLines.join('\n'),
+    };
+  }
+
+  /**
    * Mark a tool call as completed with output
+   * Now supports content parameter for rich output
    */
   async completeToolCall(
     sessionId: string,
@@ -332,7 +488,7 @@ export class ToolCallManager {
 
     const updateOptions: {
       title?: string;
-      status?: import('../types').ToolCallStatus;
+      status?: ToolCallStatus;
       content?: ToolCallContent[];
       rawOutput?: Record<string, any>;
     } = {

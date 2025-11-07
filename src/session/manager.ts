@@ -14,6 +14,8 @@ import {
   type SessionMetadata,
   type ConversationMessage,
   type SessionStatus,
+  type SessionMode,
+  type SessionModel,
 } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -36,6 +38,39 @@ export class SessionManager {
   private sessionCleanupInterval: ReturnType<typeof setInterval> | null = null;
   private processingSessions = new Set<string>(); // Track sessions actively processing prompts
 
+  // Session modes per ACP spec
+  private readonly availableModes: SessionMode[] = [
+    {
+      id: 'ask',
+      name: 'Ask Mode',
+      description: 'Q&A mode for queries and information retrieval',
+      permissionBehavior: 'strict',
+    },
+    {
+      id: 'code',
+      name: 'Code Mode',
+      description: 'Agentic coding with file editing and terminal capabilities',
+      availableTools: ['filesystem', 'terminal'],
+      permissionBehavior: 'strict',
+    },
+    {
+      id: 'architect',
+      name: 'Architect Mode',
+      description: 'High-level system design and planning',
+      availableTools: ['filesystem'],
+      permissionBehavior: 'strict',
+    },
+  ];
+
+  // Available models (can be extended)
+  private readonly availableModels: SessionModel[] = [
+    {
+      id: 'cursor-default',
+      name: 'Cursor Default Model',
+      provider: 'cursor',
+    },
+  ];
+
   constructor(config: AdapterConfig, logger: Logger) {
     this.config = config;
     this.logger = logger;
@@ -43,6 +78,8 @@ export class SessionManager {
     this.logger.debug('SessionManager initialized', {
       maxSessions: config.maxSessions,
       sessionTimeout: config.sessionTimeout,
+      availableModes: this.availableModes.length,
+      availableModels: this.availableModels.length,
     });
 
     // Start session cleanup interval
@@ -71,10 +108,15 @@ export class SessionManager {
 
       // Create session data
       const now = new Date();
+      const defaultMode = 'ask';
+      const defaultModel = 'cursor-default';
+
       const sessionData: SessionData = {
         id: sessionId,
         metadata: {
           name: metadata.name || `Session ${sessionId.slice(0, 8)}`,
+          mode: metadata.mode || defaultMode,
+          model: metadata.model || defaultModel,
           ...metadata,
         },
         conversation: [],
@@ -82,6 +124,9 @@ export class SessionManager {
           lastActivity: now,
           messageCount: 0,
           tokenCount: 0,
+          status: 'active',
+          currentMode: metadata.mode || defaultMode,
+          currentModel: metadata.model || defaultModel,
         },
         createdAt: now,
         updatedAt: now,
@@ -296,6 +341,106 @@ export class SessionManager {
         error instanceof Error ? error : undefined
       );
     }
+  }
+
+  /**
+   * Gets available session modes
+   * Per ACP spec: Returns the list of modes available for sessions
+   */
+  getAvailableModes(): SessionMode[] {
+    return this.availableModes;
+  }
+
+  /**
+   * Gets available session models
+   * Per ACP spec (UNSTABLE): Returns the list of models available for sessions
+   */
+  getAvailableModels(): SessionModel[] {
+    return this.availableModels;
+  }
+
+  /**
+   * Gets the current mode for a session
+   */
+  getSessionMode(sessionId: string): string {
+    const session = this.sessions.get(sessionId);
+    return session?.state.currentMode || 'ask';
+  }
+
+  /**
+   * Gets the current model for a session
+   */
+  getSessionModel(sessionId: string): string {
+    const session = this.sessions.get(sessionId);
+    return session?.state.currentModel || 'cursor-default';
+  }
+
+  /**
+   * Sets the mode for a session
+   * Per ACP spec: Validates mode exists before setting
+   */
+  async setSessionMode(sessionId: string, modeId: string): Promise<void> {
+    // Validate mode exists
+    const mode = this.availableModes.find((m) => m.id === modeId);
+    if (!mode) {
+      throw new SessionError(
+        `Invalid mode: ${modeId}. Available modes: ${this.availableModes.map((m) => m.id).join(', ')}`,
+        sessionId
+      );
+    }
+
+    // Load session to ensure it exists
+    const session = await this.loadSession(sessionId);
+
+    // Update mode
+    const previousMode = session.state.currentMode;
+    session.state.currentMode = modeId;
+    session.metadata.mode = modeId;
+    session.updatedAt = new Date();
+    session.state.lastActivity = new Date();
+
+    // Persist changes
+    await this.persistSession(session);
+
+    this.logger.info('Session mode changed', {
+      sessionId,
+      previousMode,
+      newMode: modeId,
+    });
+  }
+
+  /**
+   * Sets the model for a session
+   * Per ACP spec (UNSTABLE): Validates model exists before setting
+   */
+  async setSessionModel(sessionId: string, modelId: string): Promise<void> {
+    // Validate model exists
+    const model = this.availableModels.find((m) => m.id === modelId);
+    if (!model) {
+      throw new SessionError(
+        `Invalid model: ${modelId}. Available models: ${this.availableModels.map((m) => m.id).join(', ')}`,
+        sessionId
+      );
+    }
+
+    // Load session to ensure it exists
+    const session = await this.loadSession(sessionId);
+
+    // Update model
+    const previousModel = session.state.currentModel;
+    session.state.currentModel = modelId;
+    session.metadata.model = modelId;
+    session.updatedAt = new Date();
+    session.state.lastActivity = new Date();
+
+    // Persist changes
+    await this.persistSession(session);
+
+    this.logger.info('Session model changed', {
+      sessionId,
+      previousModel,
+      newModel: modelId,
+    });
   }
 
   /**

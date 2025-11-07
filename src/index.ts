@@ -21,17 +21,6 @@ export type {
   SessionMetadata,
   SessionData,
 
-  // Protocol types
-  AcpRequest,
-  AcpResponse,
-  AcpNotification,
-
-  // Content types
-  ContentBlock,
-  TextContentBlock,
-  CodeContentBlock,
-  ImageContentBlock,
-
   // Tool types
   Tool,
   ToolProvider,
@@ -48,6 +37,9 @@ export type {
   ProtocolError,
   CursorError,
 } from './types';
+
+// Protocol types
+export type { InitializationConfig } from './protocol/initialization';
 
 // Import the type for the default config
 import type { AdapterConfig } from './types';

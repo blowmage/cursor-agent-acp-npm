@@ -674,7 +674,7 @@ describe('session/new - Parameter Validation', () => {
       expect(response.result.sessionId.length).toBeGreaterThan(0);
     });
 
-    it('should not include modes or models in response (not supported)', async () => {
+    it('should include modes and models in response', async () => {
       const request: AcpRequest = {
         jsonrpc: '2.0',
         method: 'session/new',
@@ -687,8 +687,19 @@ describe('session/new - Parameter Validation', () => {
 
       const response = await adapter.processRequest(request);
 
-      expect(response.result.modes).toBeUndefined();
-      expect(response.result.models).toBeUndefined();
+      // Modes should be defined with available modes and current mode
+      expect(response.result.modes).toBeDefined();
+      expect(response.result.modes.availableModes).toBeDefined();
+      expect(Array.isArray(response.result.modes.availableModes)).toBe(true);
+      expect(response.result.modes.currentModeId).toBeDefined();
+      expect(response.result.modes.currentModeId).toBe('ask'); // Default mode
+
+      // Models should be defined with available models and current model
+      expect(response.result.models).toBeDefined();
+      expect(response.result.models.availableModels).toBeDefined();
+      expect(Array.isArray(response.result.models.availableModels)).toBe(true);
+      expect(response.result.models.currentModelId).toBeDefined();
+      expect(response.result.models.currentModelId).toBe('cursor-default'); // Default model
     });
 
     it('should return proper JSON-RPC 2.0 response structure', async () => {

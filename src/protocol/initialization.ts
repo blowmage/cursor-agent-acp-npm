@@ -4,20 +4,49 @@
  * This class implements the ACP initialization method, which is the first
  * method called by ACP clients to establish communication and discover
  * server capabilities.
+ *
+ * Per ACP spec: https://agentclientprotocol.com/protocol/initialization
  */
 
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import type {
+  InitializeRequest,
+  InitializeResponse,
+  AgentCapabilities,
+  ClientCapabilities,
+  AuthMethod,
+  Implementation,
+} from '@agentclientprotocol/sdk';
 import {
   ProtocolError,
   type AdapterConfig,
   type Logger,
-  type InitializeParams,
-  type InitializeResult,
-  type AgentCapabilities,
-  type ClientCapabilities,
   type ConnectivityTestResult,
 } from '../types';
+
+/**
+ * Configuration options for initialization behavior
+ */
+export interface InitializationConfig {
+  /**
+   * Whether to perform Cursor CLI connectivity test during initialization
+   * Default: true
+   */
+  testConnectivity?: boolean;
+
+  /**
+   * Timeout for connectivity test in milliseconds
+   * Default: 5000 (5 seconds)
+   */
+  connectivityTimeout?: number;
+
+  /**
+   * Whether initialization should fail if Cursor CLI is not available
+   * Default: false (initialization succeeds but capabilities are limited)
+   */
+  requireCursorAvailable?: boolean;
+}
 
 /**
  * Get the package version dynamically
@@ -36,22 +65,39 @@ function getPackageVersion(): string {
 export class InitializationHandler {
   private config: AdapterConfig;
   private logger: Logger;
+  private initConfig: InitializationConfig;
   private clientCapabilities: ClientCapabilities | null = null;
+  private clientInfo: Implementation | null = null;
 
-  constructor(config: AdapterConfig, logger: Logger) {
+  constructor(
+    config: AdapterConfig,
+    logger: Logger,
+    initConfig: InitializationConfig = {}
+  ) {
     this.config = config;
     this.logger = logger;
+    this.initConfig = initConfig;
   }
 
   /**
    * Get stored client capabilities
+   * Per ACP spec: Used to determine which client methods the agent can call
    */
   getClientCapabilities(): ClientCapabilities | null {
     return this.clientCapabilities;
   }
 
   /**
+   * Get stored client information
+   * Per ACP spec: Client name, version, and title for debugging and analytics
+   */
+  getClientInfo(): Implementation | null {
+    return this.clientInfo;
+  }
+
+  /**
    * Check if client supports file system read operations
+   * Per ACP spec: fs/read_text_file method availability
    */
   canRequestFileRead(): boolean {
     return this.clientCapabilities?.fs?.readTextFile ?? false;
@@ -59,6 +105,7 @@ export class InitializationHandler {
 
   /**
    * Check if client supports file system write operations
+   * Per ACP spec: fs/write_text_file method availability
    */
   canRequestFileWrite(): boolean {
     return this.clientCapabilities?.fs?.writeTextFile ?? false;
@@ -66,6 +113,7 @@ export class InitializationHandler {
 
   /**
    * Check if client supports terminal operations
+   * Per ACP spec: terminal/* methods availability
    */
   canRequestTerminal(): boolean {
     return this.clientCapabilities?.terminal ?? false;
@@ -75,11 +123,13 @@ export class InitializationHandler {
    * Handles the ACP initialize method
    * Per ACP spec: https://agentclientprotocol.com/protocol/initialization
    */
-  async initialize(params: InitializeParams): Promise<InitializeResult> {
+  async initialize(params: InitializeRequest): Promise<InitializeResponse> {
+    const startTime = Date.now();
+
     this.logger.info('Initializing ACP adapter', {
       protocolVersion: params.protocolVersion,
       clientInfo: params.clientInfo,
-      clientCapabilities: params.clientCapabilities,
+      hasClientCapabilities: !!params.clientCapabilities,
     });
 
     try {
@@ -88,53 +138,54 @@ export class InitializationHandler {
         params.protocolVersion
       );
 
-      // Store client capabilities for later validation
-      this.clientCapabilities = params.clientCapabilities || null;
+      // Validate and store client information
+      // Per ACP spec: clientInfo will be required in future protocol versions
+      this.validateAndStoreClientInfo(params.clientInfo);
 
-      // Log client information if provided
-      if (params.clientInfo) {
-        this.logger.info('Client information', {
-          name: params.clientInfo.name,
-          title: params.clientInfo.title,
-          version: params.clientInfo.version,
-        });
-      }
+      // Validate and store client capabilities
+      // Per ACP spec: Used to determine which client methods the agent can call
+      this.validateAndStoreClientCapabilities(params.clientCapabilities);
 
-      // Log what client supports
-      if (this.clientCapabilities) {
-        this.logger.info('Client capabilities stored', {
-          supportsFileRead: this.canRequestFileRead(),
-          supportsFileWrite: this.canRequestFileWrite(),
-          supportsTerminal: this.canRequestTerminal(),
-        });
-      }
-
-      // Test cursor-agent connectivity (non-blocking)
+      // Test cursor-agent connectivity (configurable)
       // Per ACP spec: initialization should succeed to communicate capabilities
       // Errors should occur when features are actually used, not during init
-      const connectivityTest = await this.testCursorConnectivity();
-      if (!connectivityTest.success) {
-        this.logger.warn(
-          'Cursor CLI not available during initialization. Features may be limited.',
-          { error: connectivityTest.error }
-        );
-      } else if (!connectivityTest.authenticated) {
-        this.logger.warn(
-          'Cursor authentication not verified. Features may require authentication.',
-          { error: connectivityTest.error }
-        );
-      } else {
-        this.logger.info('Cursor CLI connectivity verified', {
-          version: connectivityTest.version,
-          authenticated: connectivityTest.authenticated,
-        });
+      let connectivityTest: ConnectivityTestResult | undefined;
+      if (this.initConfig.testConnectivity !== false) {
+        connectivityTest = await this.testCursorConnectivity();
+
+        if (!connectivityTest.success) {
+          this.logger.warn(
+            'Cursor CLI not available during initialization. Features may be limited.',
+            { error: connectivityTest.error }
+          );
+
+          // Optionally fail initialization if Cursor is required
+          if (this.initConfig.requireCursorAvailable) {
+            throw new ProtocolError(
+              `Cursor CLI is required but not available: ${connectivityTest.error}`
+            );
+          }
+        } else if (!connectivityTest.authenticated) {
+          this.logger.warn(
+            'Cursor authentication not verified. Features may require authentication.',
+            { error: connectivityTest.error }
+          );
+        } else {
+          this.logger.info('Cursor CLI connectivity verified', {
+            version: connectivityTest.version,
+            authenticated: connectivityTest.authenticated,
+          });
+        }
       }
 
       // Build agent capabilities based on configuration and connectivity
       const agentCapabilities = this.buildAgentCapabilities(connectivityTest);
 
+      // Build authentication methods (currently none required)
+      const authMethods = this.buildAuthMethods();
+
       // Per ACP spec: Build initialization result
-      const result: InitializeResult = {
+      const result: InitializeResponse = {
         protocolVersion: agreedVersion,
         agentCapabilities,
         agentInfo: {
@@ -142,18 +193,58 @@ export class InitializationHandler {
           title: 'Cursor Agent ACP Adapter',
           version: getPackageVersion(), // Dynamic version from package.json
         },
-        authMethods: [], // No authentication methods required currently
+        authMethods,
+
+        // Extension point for debugging and monitoring
+        _meta: {
+          // Initialization metadata
+          initializationTime: new Date().toISOString(),
+          initializationDurationMs: Date.now() - startTime,
+
+          // Cursor CLI status
+          cursorCliStatus: connectivityTest?.success
+            ? 'available'
+            : 'unavailable',
+          cursorVersion: connectivityTest?.version,
+          cursorAuthenticated: connectivityTest?.authenticated,
+
+          // Environment information
+          nodeVersion: process.version,
+          platform: process.platform,
+          arch: process.arch,
+
+          // Configuration summary (no sensitive data)
+          toolsEnabled: {
+            filesystem: this.config.tools.filesystem.enabled,
+            terminal: this.config.tools.terminal.enabled,
+          },
+
+          // Version negotiation details
+          versionNegotiation: {
+            clientRequested: params.protocolVersion,
+            agentResponded: agreedVersion,
+            agentSupports: [1], // SUPPORTED_VERSIONS constant
+          },
+
+          // Implementation details
+          implementation: 'cursor-agent-acp-npm',
+          environment: process.env['NODE_ENV'] || 'production',
+        },
       };
 
       this.logger.info('ACP adapter initialized successfully', {
         protocolVersion: result.protocolVersion,
         agentCapabilities: result.agentCapabilities,
         agentInfo: result.agentInfo,
+        durationMs: Date.now() - startTime,
       });
 
       return result;
     } catch (error) {
-      this.logger.error('Initialization failed', error);
+      this.logger.error('Initialization failed', {
+        error,
+        durationMs: Date.now() - startTime,
+      });
       throw error instanceof ProtocolError
         ? error
         : new ProtocolError(
@@ -161,6 +252,108 @@ export class InitializationHandler {
             error instanceof Error ? error : undefined
           );
     }
+  }
+
+  /**
+   * Validates and stores client information
+   * Per ACP spec: clientInfo will be required in future protocol versions
+   */
+  private validateAndStoreClientInfo(
+    clientInfo: Implementation | null | undefined
+  ): void {
+    if (!clientInfo) {
+      this.logger.info(
+        'Client did not provide clientInfo. ' +
+          'Note: clientInfo will be required in future protocol versions.'
+      );
+      this.clientInfo = null;
+      return;
+    }
+
+    // Validate clientInfo structure
+    if (!clientInfo.name || !clientInfo.version) {
+      this.logger.warn('Client provided incomplete clientInfo', {
+        hasName: !!clientInfo.name,
+        hasVersion: !!clientInfo.version,
+        hasTitle: !!clientInfo.title,
+      });
+    } else {
+      this.logger.info('Client information received', {
+        name: clientInfo.name,
+        title: clientInfo.title,
+        version: clientInfo.version,
+      });
+    }
+
+    this.clientInfo = clientInfo;
+  }
+
+  /**
+   * Validates and stores client capabilities
+   * Per ACP spec: Used to determine which client methods the agent can call
+   */
+  private validateAndStoreClientCapabilities(
+    capabilities: ClientCapabilities | null | undefined
+  ): void {
+    if (!capabilities) {
+      this.logger.info('Client did not provide capabilities');
+      this.clientCapabilities = null;
+      return;
+    }
+
+    // Validate and log file system capabilities
+    if (capabilities.fs) {
+      if (typeof capabilities.fs !== 'object') {
+        this.logger.warn('Invalid fs capabilities structure', {
+          fs: capabilities.fs,
+        });
+      } else {
+        const fsCapabilities: string[] = [];
+        if (capabilities.fs.readTextFile) {
+          fsCapabilities.push('fs/read_text_file');
+        }
+        if (capabilities.fs.writeTextFile) {
+          fsCapabilities.push('fs/write_text_file');
+        }
+
+        if (fsCapabilities.length > 0) {
+          this.logger.info('Client file system capabilities', {
+            methods: fsCapabilities,
+          });
+        }
+      }
+    }
+
+    // Validate and log terminal capability
+    if (capabilities.terminal !== undefined) {
+      if (typeof capabilities.terminal !== 'boolean') {
+        this.logger.warn('Invalid terminal capability type', {
+          type: typeof capabilities.terminal,
+          value: capabilities.terminal,
+        });
+      } else if (capabilities.terminal) {
+        this.logger.info('Client supports terminal/* methods');
+      }
+    }
+
+    // Check for custom capabilities in _meta
+    if (capabilities._meta) {
+      this.logger.debug(
+        'Client provided custom capabilities',
+        capabilities._meta
+      );
+    }
+
+    // Store validated capabilities
+    this.clientCapabilities = capabilities;
+
+    // Summary log
+    this.logger.info('Client capabilities stored', {
+      supportsFileRead: this.canRequestFileRead(),
+      supportsFileWrite: this.canRequestFileWrite(),
+      supportsTerminal: this.canRequestTerminal(),
+      hasCustomCapabilities: !!capabilities._meta,
+    });
   }
 
   /**
@@ -177,37 +370,63 @@ export class InitializationHandler {
     // Per ACP spec: protocol versions are integers (1, 2, 3, etc.)
     const SUPPORTED_VERSIONS = [1]; // This agent supports protocol version 1
     const LATEST_VERSION = Math.max(...SUPPORTED_VERSIONS);
+    const MIN_VERSION = Math.min(...SUPPORTED_VERSIONS);
 
-    this.logger.info(`Client requested protocol version: ${clientVersion}`);
+    this.logger.info('Protocol version negotiation', {
+      clientRequested: clientVersion,
+      agentSupports: SUPPORTED_VERSIONS,
+      agentLatest: LATEST_VERSION,
+    });
 
     // Validate client provided a version
     if (clientVersion === null || clientVersion === undefined) {
       throw new ProtocolError(
-        'Protocol version is required. Please specify "protocolVersion" in initialize request.'
+        'Protocol version is required in initialize request. ' +
+          `This agent supports versions: ${SUPPORTED_VERSIONS.join(', ')}. ` +
+          'Please specify "protocolVersion" in your request.'
       );
     }
 
     // Validate it's a number and an integer (per ACP spec)
     if (typeof clientVersion !== 'number' || !Number.isInteger(clientVersion)) {
       throw new ProtocolError(
-        `Protocol version must be an integer. Received: ${clientVersion} (${typeof clientVersion}). ` +
+        `Protocol version must be an integer. ` +
+          `Received: ${clientVersion} (${typeof clientVersion}). ` +
+          `Supported versions: ${SUPPORTED_VERSIONS.join(', ')}`
+      );
+    }
+
+    // Validate version is positive
+    if (clientVersion < 1) {
+      throw new ProtocolError(
+        `Protocol version must be positive. Received: ${clientVersion}. ` +
           `Supported versions: ${SUPPORTED_VERSIONS.join(', ')}`
       );
     }
 
     // Check if we support the client's requested version
     if (SUPPORTED_VERSIONS.includes(clientVersion)) {
-      this.logger.info(`Agreed on protocol version: ${clientVersion}`);
+      this.logger.info(
+        `Protocol version ${clientVersion} agreed upon (client and agent compatible)`
+      );
       return clientVersion;
     }
 
-    // Client may not support our version - let them decide whether to proceed
-    this.logger.warn(
-      `Client requested version ${clientVersion} which is not supported. ` +
-        `Responding with version ${LATEST_VERSION}. ` +
-        `Supported versions: ${SUPPORTED_VERSIONS.join(', ')}. ` +
-        `Client may choose to disconnect if incompatible.`
-    );
+    // Version mismatch - provide detailed guidance
+    if (clientVersion < MIN_VERSION) {
+      this.logger.warn(
+        `Client version ${clientVersion} is older than minimum supported version ${MIN_VERSION}. ` +
+          `Responding with version ${LATEST_VERSION}. ` +
+          `Client should upgrade or disconnect.`
+      );
+    } else if (clientVersion > LATEST_VERSION) {
+      this.logger.warn(
+        `Client version ${clientVersion} is newer than latest supported version ${LATEST_VERSION}. ` +
+          `Responding with version ${LATEST_VERSION}. ` +
+          `Client may disconnect if it doesn't support backward compatibility.`
+      );
+    }
+
     return LATEST_VERSION;
   }
 
@@ -224,36 +443,87 @@ export class InitializationHandler {
       connectivityResult?.authenticated === true;
 
     return {
-      // Per ACP spec: session/load method availability
-      loadSession: true, // We support loading existing sessions
+      // Session Management
+      // -----------------
+      // Per ACP spec: Indicates whether agent supports session/load
+      // We support loading existing sessions from the session manager
+      loadSession: true,
 
-      // Per ACP spec: Prompt content type capabilities
-      // Baseline: All agents MUST support Text and ResourceLink
+      // Prompt Content Capabilities
+      // --------------------------
+      // Per ACP spec: Text and ResourceLink are REQUIRED for all agents
+      // Additional capabilities are advertised below:
       promptCapabilities: {
-        image: cursorAvailable, // Only if cursor is available
-        audio: false, // We don't support ContentBlock::Audio
-        embeddedContext: cursorAvailable, // Only if cursor is available
+        // Image support requires Cursor CLI to be available and authenticated
+        // Images are passed through to Cursor for processing
+        // Per ACP spec: ContentBlock::Image support
+        image: cursorAvailable,
+
+        // Audio content blocks are not currently supported
+        // Per ACP spec: ContentBlock::Audio support
+        // TODO: Add audio support when Cursor CLI supports it
+        audio: false,
+
+        // Embedded context (ContentBlock::Resource) requires Cursor CLI
+        // This allows clients to include referenced context in prompts
+        // Per ACP spec: ContentBlock::Resource support in session/prompt
+        embeddedContext: cursorAvailable,
       },
 
-      // Per ACP spec: MCP server connection capabilities
+      // MCP Server Capabilities
+      // -----------------------
+      // Per ACP spec: Indicates which MCP server connection types are supported
       mcpCapabilities: {
-        http: false, // We don't connect to MCP servers over HTTP yet
-        sse: false, // We don't connect to MCP servers over SSE
+        // HTTP-based MCP server connections not yet implemented
+        // Per ACP spec: McpServer::Http support
+        // TODO: Add HTTP MCP support
+        http: false,
+
+        // Server-Sent Events MCP connections not yet implemented
+        // Per ACP spec: McpServer::Sse support
+        // TODO: Add SSE MCP support
+        sse: false,
       },
 
-      // Custom extensions via _meta
+      // Extension point for custom capabilities
+      // Per ACP spec: _meta field for implementation-specific information
       _meta: {
-        // Additional capabilities not in the standard spec
-        streaming: cursorAvailable, // We support streaming when cursor is available
-        toolCalling: cursorAvailable, // We support tool calling when cursor is available
+        // Custom capabilities that extend the ACP standard
+        streaming: cursorAvailable,
+        toolCalling: cursorAvailable,
         fileSystem: this.config.tools.filesystem.enabled,
         terminal: this.config.tools.terminal.enabled,
-        contentTypes: cursorAvailable ? ['text', 'code', 'image'] : ['text'],
-        cursorAvailable, // Indicate cursor CLI availability status
+
+        // Diagnostic information
+        cursorAvailable,
         cursorVersion: connectivityResult?.version,
         description: 'Production-ready ACP adapter for Cursor CLI',
+
+        // Implementation details for debugging
+        implementation: 'cursor-agent-acp-npm',
+        repositoryUrl: 'https://github.com/blowmage/cursor-agent-acp-npm',
       },
     };
+  }
+
+  /**
+   * Builds authentication methods supported by this agent
+   * Per ACP spec: https://agentclientprotocol.com/protocol/authentication
+   */
+  private buildAuthMethods(): AuthMethod[] {
+    // Currently no authentication required
+    // Per ACP spec: authMethods is an array of supported authentication methods
+    // Empty array indicates no authentication is required
+
+    // Future: Add API key, OAuth, or other auth methods here
+    // Example for future API key auth:
+    // return [{
+    //   id: 'api-key',
+    //   name: 'API Key Authentication',
+    //   description: 'Authenticate using a Cursor API key',
+    // }];
+
+    return [];
   }
 
   /**

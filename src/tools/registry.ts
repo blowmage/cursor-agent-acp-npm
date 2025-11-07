@@ -6,6 +6,7 @@
  * cursor-specific tools.
  */
 
+import type { ToolKind, ToolCallLocation } from '@agentclientprotocol/sdk';
 import {
   ToolError,
   type AdapterConfig,
@@ -178,10 +179,10 @@ export class ToolRegistry {
         const locations = this.extractLocations(toolCall.parameters);
         const reportOptions: {
           title: string;
-          kind: import('../types').ToolKind;
+          kind: ToolKind;
           status: 'in_progress';
           rawInput: Record<string, any>;
-          locations?: import('../types').ToolCallLocation[];
+          locations?: ToolCallLocation[];
         } = {
           title: this.getToolTitle(toolCall.name, toolCall.parameters),
           kind: toolKind,
@@ -207,8 +208,20 @@ export class ToolRegistry {
       // Report tool call completion
       if (shouldReportToolCalls && toolCallId) {
         if (result.success) {
+          // Check if tool result includes diffs (from cursor-tools)
+          let content;
+          if (
+            result.metadata?.['diffs'] &&
+            Array.isArray(result.metadata['diffs'])
+          ) {
+            content = this.toolCallManager!.convertDiffContent(
+              result.metadata['diffs']
+            );
+          }
+
           await this.toolCallManager!.completeToolCall(sessionId!, toolCallId, {
             rawOutput: result.result,
+            ...(content && { content }),
           });
         } else {
           await this.toolCallManager!.failToolCall(sessionId!, toolCallId, {
@@ -253,10 +266,10 @@ export class ToolRegistry {
         const locations = this.extractLocations(toolCall.parameters);
         const reportOptions: {
           title: string;
-          kind: import('../types').ToolKind;
+          kind: ToolKind;
           status: 'failed';
           rawInput: Record<string, any>;
-          locations?: import('../types').ToolCallLocation[];
+          locations?: ToolCallLocation[];
         } = {
           title: this.getToolTitle(toolCall.name, toolCall.parameters),
           kind: toolKind,
@@ -295,8 +308,8 @@ export class ToolRegistry {
    */
   private extractLocations(
     parameters: Record<string, any>
-  ): import('../types').ToolCallLocation[] {
-    const locations: import('../types').ToolCallLocation[] = [];
+  ): ToolCallLocation[] {
+    const locations: ToolCallLocation[] = [];
 
     // Extract file path from different parameter names
     if (parameters['path']) {
@@ -325,9 +338,9 @@ export class ToolRegistry {
   /**
    * Get the ACP tool kind for a tool name
    */
-  private getToolKind(toolName: string): import('../types').ToolKind {
+  private getToolKind(toolName: string): ToolKind {
     // Map tool names to ACP tool kinds
-    const kindMap: Record<string, import('../types').ToolKind> = {
+    const kindMap: Record<string, ToolKind> = {
       // Filesystem tools
       read_file: 'read',
       write_file: 'edit',

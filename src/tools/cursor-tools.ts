@@ -6,6 +6,7 @@
  */
 
 import * as path from 'path';
+import type { ContentBlock } from '@agentclientprotocol/sdk';
 import {
   ToolError,
   type AdapterConfig,
@@ -488,13 +489,10 @@ export class CursorToolsProvider implements ToolProvider {
       }
 
       // Read old file contents to create diffs
+      // Per ACP SDK: 'diff' is not a ContentBlock type, it's a ToolCallContent type
+      // We wrap diffs in resource blocks with mimeType 'text/x-diff'
       const fs = await import('fs/promises');
-      const diffs: Array<{
-        type: 'diff';
-        path: string;
-        oldText: string | null;
-        newText: string;
-      }> = [];
+      const diffs: Array<ContentBlock> = [];
 
       for (const change of changes) {
         const resolvedPath = path.resolve(change.file);
@@ -508,11 +506,28 @@ export class CursorToolsProvider implements ToolProvider {
           oldText = null;
         }
 
+        // Format as unified diff
+        const diffText = this.formatUnifiedDiff(
+          resolvedPath,
+          oldText || '',
+          change.newContent
+        );
+
+        // Wrap in resource block per ACP spec
         diffs.push({
-          type: 'diff',
-          path: resolvedPath,
-          oldText,
-          newText: change.newContent,
+          type: 'resource',
+          resource: {
+            uri: `diff://${resolvedPath}`,
+            text: diffText,
+            mimeType: 'text/x-diff',
+          },
+          annotations: {
+            _meta: {
+              diffType: 'unified',
+              originalPath: resolvedPath,
+              isNewFile: oldText === null,
+            },
+          },
         });
       }
 
@@ -1042,5 +1057,43 @@ export class CursorToolsProvider implements ToolProvider {
     }
 
     return errors;
+  }
+
+  /**
+   * Format a unified diff for displaying file changes
+   * Per ACP: diffs should be wrapped in resource blocks with mimeType 'text/x-diff'
+   */
+  private formatUnifiedDiff(
+    filePath: string,
+    oldContent: string,
+    newContent: string
+  ): string {
+    const lines: string[] = [];
+
+    // Add diff header
+    lines.push(`--- ${filePath}`);
+    lines.push(`+++ ${filePath}`);
+
+    // For simplicity, we'll show the entire file as changed
+    // A more sophisticated implementation would show only changed lines
+    const oldLines = oldContent.split('\n');
+    const newLines = newContent.split('\n');
+
+    // Add hunk header
+    lines.push(`@@ -1,${oldLines.length} +1,${newLines.length} @@`);
+
+    // Show old lines
+    if (oldContent) {
+      for (const line of oldLines) {
+        lines.push(`-${line}`);
+      }
+    }
+
+    // Show new lines
+    for (const line of newLines) {
+      lines.push(`+${line}`);
+    }
+
+    return lines.join('\n');
   }
 }

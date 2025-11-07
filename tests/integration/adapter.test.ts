@@ -418,8 +418,10 @@ describe('CursorAgentAdapter Integration', () => {
         };
 
         const loadResponse = await adapter.processRequest(loadRequest);
-        // Per ACP spec: session/load returns null after streaming conversation
-        expect(loadResponse.result).toBeNull();
+        // Per ACP spec: session/load returns LoadSessionResponse with modes and models
+        expect(loadResponse.result).toBeDefined();
+        expect(loadResponse.result.modes).toBeDefined();
+        expect(loadResponse.result.models).toBeDefined();
 
         // Delete session
         const deleteRequest: AcpRequest = {
@@ -592,7 +594,7 @@ describe('CursorAgentAdapter Integration', () => {
         );
       });
 
-      it('should process code prompt', async () => {
+      it('should process code prompt as embedded resource', async () => {
         const promptRequest: AcpRequest = {
           jsonrpc: '2.0',
           method: 'session/prompt',
@@ -605,10 +607,12 @@ describe('CursorAgentAdapter Integration', () => {
                 text: 'Please review this code:',
               },
               {
-                type: 'code',
-                value: 'const x: string = "hello";',
-                language: 'typescript',
-                filename: 'test.ts',
+                type: 'resource',
+                resource: {
+                  uri: 'file:///test.ts',
+                  mimeType: 'text/typescript',
+                  text: 'const x: string = "hello";',
+                },
               },
             ],
             stream: false,

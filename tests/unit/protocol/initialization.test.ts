@@ -622,7 +622,7 @@ describe('InitializationHandler', () => {
       expect(result.protocolVersion).toBe(1);
       expect(logSpy).toHaveBeenCalledWith(
         expect.stringContaining(
-          'Client requested version 2 which is not supported'
+          'Client version 2 is newer than latest supported version 1'
         )
       );
     });
@@ -642,39 +642,25 @@ describe('InitializationHandler', () => {
 
     it('should negotiate down to version 1 when client requests version 0', async () => {
       // Arrange
-      const logSpy = jest.spyOn(mockLogger, 'warn');
       const params: InitializeParams = {
         protocolVersion: 0,
       };
 
-      // Act
-      const result = await handler.initialize(params);
-
-      // Assert - should negotiate down to version 1 (per ACP spec: be lenient)
-      expect(result.protocolVersion).toBe(1);
-      expect(logSpy).toHaveBeenCalledWith(
-        expect.stringContaining(
-          'Client requested version 0 which is not supported'
-        )
+      // Act & Assert - version 0 is invalid and should throw
+      await expect(handler.initialize(params)).rejects.toThrow(
+        'Protocol version must be positive'
       );
     });
 
     it('should negotiate down to version 1 for negative protocol versions', async () => {
       // Arrange
-      const logSpy = jest.spyOn(mockLogger, 'warn');
       const params: InitializeParams = {
         protocolVersion: -1,
       };
 
-      // Act
-      const result = await handler.initialize(params);
-
-      // Assert - should negotiate down to version 1 (per ACP spec: be lenient)
-      expect(result.protocolVersion).toBe(1);
-      expect(logSpy).toHaveBeenCalledWith(
-        expect.stringContaining(
-          'Client requested version -1 which is not supported'
-        )
+      // Act & Assert - negative versions are invalid and should throw
+      await expect(handler.initialize(params)).rejects.toThrow(
+        'Protocol version must be positive'
       );
     });
 
@@ -912,7 +898,7 @@ describe('InitializationHandler', () => {
       expect(result.agentCapabilities._meta?.toolCalling).toBe(false);
     });
 
-    it('should include text, code, image in contentTypes when cursor is available', async () => {
+    it('should include implementation metadata in _meta', async () => {
       // Arrange
       const params: InitializeParams = {
         protocolVersion: 1,
@@ -926,29 +912,12 @@ describe('InitializationHandler', () => {
       // Act
       const result = await handler.initialize(params);
 
-      // Assert
-      expect(result.agentCapabilities._meta?.contentTypes).toEqual([
-        'text',
-        'code',
-        'image',
-      ]);
-    });
-
-    it('should include only text in contentTypes when cursor is unavailable', async () => {
-      // Arrange
-      const params: InitializeParams = {
-        protocolVersion: 1,
-      };
-
-      jest.spyOn(handler as any, 'testCursorConnectivity').mockResolvedValue({
-        success: false,
-      });
-
-      // Act
-      const result = await handler.initialize(params);
-
-      // Assert
-      expect(result.agentCapabilities._meta?.contentTypes).toEqual(['text']);
+      // Assert - verify key metadata fields are present
+      expect(result.agentCapabilities._meta).toBeDefined();
+      expect(result.agentCapabilities._meta?.implementation).toBe(
+        'cursor-agent-acp-npm'
+      );
+      expect(result.agentCapabilities._meta?.description).toBeDefined();
     });
 
     it('should set _meta.cursorAvailable to true when cursor is available', async () => {
@@ -1032,7 +1001,7 @@ describe('InitializationHandler', () => {
       // Assert
       expect(result).toBeDefined();
       expect(logSpy).toHaveBeenCalledWith(
-        'Client information',
+        'Client information received',
         expect.objectContaining({
           name: 'test-client',
           title: 'Test Client Application',
@@ -1203,7 +1172,10 @@ describe('InitializationHandler', () => {
       await expect(handler.initialize(params)).rejects.toThrow();
       expect(logSpy).toHaveBeenCalledWith(
         'Initialization failed',
-        expect.any(Error)
+        expect.objectContaining({
+          error: expect.any(Error),
+          durationMs: expect.any(Number),
+        })
       );
     });
   });

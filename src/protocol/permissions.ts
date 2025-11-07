@@ -5,15 +5,14 @@
  * Allows agents to request user permission before executing sensitive operations.
  */
 
-import {
-  ProtocolError,
-  type Logger,
-  type AcpRequest,
-  type AcpResponse,
-  type RequestPermissionParams,
-  type PermissionOutcome,
-  type PermissionOption,
-} from '../types';
+import type {
+  Request,
+  Request1,
+  RequestPermissionRequest,
+  PermissionOption,
+} from '@agentclientprotocol/sdk';
+import type { Error as JsonRpcError } from '@agentclientprotocol/sdk';
+import { ProtocolError, type Logger, type PermissionOutcome } from '../types';
 
 export interface PermissionHandlerOptions {
   logger: Logger;
@@ -46,7 +45,7 @@ export class PermissionsHandler {
    * Returns a Promise that will be resolved when the client responds
    */
   async createPermissionRequest(
-    params: RequestPermissionParams
+    params: RequestPermissionRequest
   ): Promise<PermissionOutcome> {
     // Generate a unique request ID
     const requestId = `perm_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
@@ -88,8 +87,13 @@ export class PermissionsHandler {
    * However, in our architecture, we need to return a request ID and handle
    * the response asynchronously.
    */
-  async handlePermissionRequest(request: AcpRequest): Promise<AcpResponse> {
-    const params = request.params as RequestPermissionParams;
+  async handlePermissionRequest(request: Request | Request1): Promise<{
+    jsonrpc: '2.0';
+    id: string | number | null;
+    result?: any | null;
+    error?: JsonRpcError;
+  }> {
+    const params = request.params as RequestPermissionRequest;
 
     if (!params || typeof params !== 'object') {
       throw new ProtocolError('Invalid permission request parameters');
@@ -145,7 +149,14 @@ export class PermissionsHandler {
       outcome,
     });
 
-    return {
+    return <
+      {
+        jsonrpc: '2.0';
+        id: string | number | null;
+        result?: any | null;
+        error?: JsonRpcError;
+      }
+    >{
       jsonrpc: '2.0',
       id: request.id,
       result: {

@@ -9,21 +9,33 @@
  */
 
 import { createServer, Server } from 'http';
+import type {
+  Request,
+  Request1,
+  InitializeRequest as InitializeParams,
+  NewSessionRequest,
+  NewSessionResponse,
+  LoadSessionRequest,
+  LoadSessionResponse,
+  SetSessionModeRequest,
+  SetSessionModeResponse,
+  SetSessionModelRequest,
+  SetSessionModelResponse,
+  SessionModeState,
+  SessionModelState,
+  CancelNotification,
+} from '@agentclientprotocol/sdk';
+import type { Error as JsonRpcError } from '@agentclientprotocol/sdk';
 import {
   AdapterError,
   ProtocolError,
   type AdapterConfig,
   type AdapterOptions,
   type Logger,
-  type AcpRequest,
-  type AcpResponse,
-  type InitializeParams,
-  type SessionNewParams,
-  type SessionLoadParams,
   type SessionListParams,
   type SessionUpdateParams,
   type SessionDeleteParams,
-  type SessionCancelParams,
+  type SessionMetadata,
   type ToolCallParams,
 } from '../types';
 import { createLogger } from '../utils/logger';
@@ -204,7 +216,12 @@ export class CursorAgentAdapter {
   /**
    * Process ACP request and return response
    */
-  async processRequest(request: AcpRequest): Promise<AcpResponse> {
+  async processRequest(request: Request | Request1): Promise<{
+    jsonrpc: '2.0';
+    id: string | number | null;
+    result?: any | null;
+    error?: JsonRpcError;
+  }> {
     this.logger.debug('Processing ACP request', {
       method: request.method,
       id: request.id,
@@ -220,6 +237,12 @@ export class CursorAgentAdapter {
 
         case 'session/load':
           return await this.handleSessionLoad(request);
+
+        case 'session/set_mode':
+          return await this.handleSetSessionMode(request);
+
+        case 'session/set_model':
+          return await this.handleSetSessionModel(request);
 
         case 'session/list':
           return await this.handleSessionList(request);
@@ -251,7 +274,14 @@ export class CursorAgentAdapter {
     } catch (error) {
       this.logger.error('Request processing failed', { error, request });
 
-      return {
+      return <
+        {
+          jsonrpc: '2.0';
+          id: string | number | null;
+          result?: any | null;
+          error?: JsonRpcError;
+        }
+      >{
         jsonrpc: '2.0',
         id: request.id,
         error: {
@@ -410,7 +440,11 @@ export class CursorAgentAdapter {
   /**
    * Send a notification to the client via stdout
    */
-  sendNotification(notification: import('../types').AcpNotification): void {
+  sendNotification(notification: {
+    jsonrpc: '2.0';
+    method: string;
+    params?: any;
+  }): void {
     const notificationStr = JSON.stringify(notification);
     this.logger.debug('Sending notification to client', {
       method: notification.method,
@@ -460,7 +494,7 @@ export class CursorAgentAdapter {
   }
 
   private async processStdioMessage(message: string): Promise<void> {
-    const request: AcpRequest = JSON.parse(message);
+    const request: Request | Request1 = JSON.parse(message);
 
     // Per JSON-RPC 2.0 spec: Notifications (requests without id) do not receive responses
     if (this.isNotification(request)) {
@@ -514,7 +548,7 @@ export class CursorAgentAdapter {
 
       req.on('end', async () => {
         try {
-          const request: AcpRequest = JSON.parse(body);
+          const request: Request | Request1 = JSON.parse(body);
 
           // Per JSON-RPC 2.0 spec: Notifications (requests without id) do not receive responses
           if (this.isNotification(request)) {
@@ -554,7 +588,12 @@ export class CursorAgentAdapter {
 
   // ACP Method handlers
 
-  private async handleInitialize(request: AcpRequest): Promise<AcpResponse> {
+  private async handleInitialize(request: Request | Request1): Promise<{
+    jsonrpc: '2.0';
+    id: string | number | null;
+    result?: any | null;
+    error?: JsonRpcError;
+  }> {
     if (!this.initializationHandler) {
       throw new ProtocolError('Initialization handler not available');
     }
@@ -566,20 +605,34 @@ export class CursorAgentAdapter {
     // It will validate protocolVersion and handle all fields properly
     const result = await this.initializationHandler.initialize(params);
 
-    return {
+    return <
+      {
+        jsonrpc: '2.0';
+        id: string | number | null;
+        result?: any | null;
+        error?: JsonRpcError;
+      }
+    >{
       jsonrpc: '2.0',
       id: request.id,
       result,
     };
   }
 
-  private async handleSessionNew(request: AcpRequest): Promise<AcpResponse> {
+  private async handleSessionNew(request: Request | Request1): Promise<{
+    jsonrpc: '2.0';
+    id: string | number | null;
+    result?: any | null;
+    error?: JsonRpcError;
+  }> {
     if (!this.sessionManager) {
       throw new ProtocolError('Session manager not available');
     }
 
-    const params =
-      (request.params as SessionNewParams) || ({} as SessionNewParams);
+    const params: NewSessionRequest & { metadata?: Partial<SessionMetadata> } =
+      (request.params as NewSessionRequest & {
+        metadata?: Partial<SessionMetadata>;
+      }) || ({} as NewSessionRequest & { metadata?: Partial<SessionMetadata> });
 
     // Per ACP spec: cwd is required
     if (typeof params.cwd !== 'string' || params.cwd.trim() === '') {
@@ -626,26 +679,61 @@ export class CursorAgentAdapter {
       );
     }
 
-    // Per ACP spec: NewSessionResponse must contain sessionId (required),
-    // and optionally modes and models. No other fields.
-    return {
-      jsonrpc: '2.0',
-      id: request.id,
-      result: {
-        sessionId: sessionData.id,
-        // modes: null, // Optional - omit if not supported
-        // models: null, // Optional - omit if not supported
+    // Build mode state per ACP spec
+    const modes: SessionModeState = {
+      availableModes: this.sessionManager.getAvailableModes().map((mode) => ({
+        id: mode.id,
+        name: mode.name,
+        description: mode.description,
+      })),
+      currentModeId: sessionData.state.currentMode || 'ask',
+    };
+
+    // Build model state per ACP spec (UNSTABLE)
+    const models: SessionModelState = {
+      availableModels: this.sessionManager
+        .getAvailableModels()
+        .map((model) => ({
+          modelId: model.id,
+          name: model.name,
+        })),
+      currentModelId: sessionData.state.currentModel || 'cursor-default',
+    };
+
+    // Per ACP spec: NewSessionResponse with typed response
+    const response: NewSessionResponse = {
+      sessionId: sessionData.id,
+      modes,
+      models,
+      _meta: {
+        createdAt: sessionData.createdAt.toISOString(),
+        cwd,
+        mcpServerCount: mcpServers.length,
       },
+    };
+
+    return {
+      jsonrpc: '2.0' as const,
+      id: request.id!,
+      result: response,
     };
   }
 
-  private async handleSessionLoad(request: AcpRequest): Promise<AcpResponse> {
+  private async handleSessionLoad(request: Request | Request1): Promise<{
+    jsonrpc: '2.0';
+    id: string | number | null;
+    result?: any | null;
+    error?: JsonRpcError;
+  }> {
     if (!this.sessionManager) {
       throw new ProtocolError('Session manager not available');
     }
 
-    const params =
-      (request.params as SessionLoadParams) || ({} as SessionLoadParams);
+    const params: LoadSessionRequest & { metadata?: Partial<SessionMetadata> } =
+      (request.params as LoadSessionRequest & {
+        metadata?: Partial<SessionMetadata>;
+      }) ||
+      ({} as LoadSessionRequest & { metadata?: Partial<SessionMetadata> });
     if (!params.sessionId) {
       throw new ProtocolError('sessionId is required');
     }
@@ -698,18 +786,8 @@ export class CursorAgentAdapter {
       if (!message.content || !Array.isArray(message.content)) continue;
       // Stream each content block as a separate notification
       for (const contentBlock of message.content) {
-        // Convert content block to ACP format based on type
-        let contentData: Record<string, any>;
-        if (contentBlock.type === 'text') {
-          contentData = { text: contentBlock.value };
-        } else if (contentBlock.type === 'code') {
-          contentData = {
-            code: contentBlock.value,
-            language: (contentBlock as any).language,
-          };
-        } else {
-          contentData = {};
-        }
+        // Convert content block to ACP format - use SDK ContentBlock directly
+        const contentData = { ...contentBlock };
 
         const notification = {
           jsonrpc: '2.0' as const,
@@ -718,10 +796,7 @@ export class CursorAgentAdapter {
             sessionId: sessionId,
             update: {
               sessionUpdate: sessionUpdateType,
-              content: {
-                type: contentBlock.type,
-                ...contentData,
-              },
+              content: contentData,
             },
           },
         };
@@ -731,16 +806,146 @@ export class CursorAgentAdapter {
       }
     }
 
-    // Per ACP spec: After streaming all conversation entries,
-    // respond to the original session/load request with null
+    // Build mode state per ACP spec
+    const modes: SessionModeState = {
+      availableModes: this.sessionManager.getAvailableModes().map((mode) => ({
+        id: mode.id,
+        name: mode.name,
+        description: mode.description,
+      })),
+      currentModeId: sessionData.state.currentMode || 'ask',
+    };
+
+    // Build model state per ACP spec (UNSTABLE)
+    const models: SessionModelState = {
+      availableModels: this.sessionManager
+        .getAvailableModels()
+        .map((model) => ({
+          modelId: model.id,
+          name: model.name,
+        })),
+      currentModelId: sessionData.state.currentModel || 'cursor-default',
+    };
+
+    // Per ACP spec: LoadSessionResponse with mode and model state
+    const response: LoadSessionResponse = {
+      modes,
+      models,
+      _meta: {
+        sessionId: sessionData.id,
+        loadedAt: new Date().toISOString(),
+        messageCount: sessionData.state.messageCount,
+        lastActivity: sessionData.state.lastActivity.toISOString(),
+        cwd,
+        mcpServerCount: mcpServers.length,
+      },
+    };
+
     return {
-      jsonrpc: '2.0',
-      id: request.id,
-      result: null,
+      jsonrpc: '2.0' as const,
+      id: request.id!,
+      result: response,
     };
   }
 
-  private async handleSessionList(request: AcpRequest): Promise<AcpResponse> {
+  private async handleSetSessionMode(request: Request | Request1): Promise<{
+    jsonrpc: '2.0';
+    id: string | number | null;
+    result?: SetSessionModeResponse;
+    error?: JsonRpcError;
+  }> {
+    if (!this.sessionManager) {
+      throw new ProtocolError('Session manager not available');
+    }
+
+    const params = request.params as SetSessionModeRequest;
+
+    if (!params.sessionId) {
+      throw new ProtocolError('sessionId is required');
+    }
+
+    if (!params.modeId) {
+      throw new ProtocolError('modeId is required');
+    }
+
+    // Get previous mode for tracking
+    const previousMode = this.sessionManager.getSessionMode(params.sessionId);
+
+    // Set the new mode
+    await this.sessionManager.setSessionMode(params.sessionId, params.modeId);
+
+    this.logger.info('Session mode changed', {
+      sessionId: params.sessionId,
+      previousMode,
+      newMode: params.modeId,
+    });
+
+    const response: SetSessionModeResponse = {
+      _meta: {
+        previousMode,
+        changedAt: new Date().toISOString(),
+      },
+    };
+
+    return {
+      jsonrpc: '2.0' as const,
+      id: request.id!,
+      result: response,
+    };
+  }
+
+  private async handleSetSessionModel(request: Request | Request1): Promise<{
+    jsonrpc: '2.0';
+    id: string | number | null;
+    result?: SetSessionModelResponse;
+    error?: JsonRpcError;
+  }> {
+    if (!this.sessionManager) {
+      throw new ProtocolError('Session manager not available');
+    }
+
+    const params = request.params as SetSessionModelRequest;
+
+    if (!params.sessionId) {
+      throw new ProtocolError('sessionId is required');
+    }
+
+    if (!params.modelId) {
+      throw new ProtocolError('modelId is required');
+    }
+
+    // Get previous model for tracking
+    const previousModel = this.sessionManager.getSessionModel(params.sessionId);
+
+    // Set the new model
+    await this.sessionManager.setSessionModel(params.sessionId, params.modelId);
+
+    this.logger.info('Session model changed', {
+      sessionId: params.sessionId,
+      previousModel,
+      newModel: params.modelId,
+    });
+
+    const response: SetSessionModelResponse = {
+      _meta: {
+        previousModel,
+        changedAt: new Date().toISOString(),
+      },
+    };
+
+    return {
+      jsonrpc: '2.0' as const,
+      id: request.id!,
+      result: response,
+    };
+  }
+
+  private async handleSessionList(request: Request | Request1): Promise<{
+    jsonrpc: '2.0';
+    id: string | number | null;
+    result?: any | null;
+    error?: JsonRpcError;
+  }> {
     if (!this.sessionManager) {
       throw new ProtocolError('Session manager not available');
     }
@@ -753,7 +958,14 @@ export class CursorAgentAdapter {
       params.filter
     );
 
-    return {
+    return <
+      {
+        jsonrpc: '2.0';
+        id: string | number | null;
+        result?: any | null;
+        error?: JsonRpcError;
+      }
+    >{
       jsonrpc: '2.0',
       id: request.id,
       result: {
@@ -764,23 +976,35 @@ export class CursorAgentAdapter {
     };
   }
 
-  private async handleSessionUpdate(request: AcpRequest): Promise<AcpResponse> {
+  private async handleSessionUpdate(request: Request | Request1): Promise<{
+    jsonrpc: '2.0';
+    id: string | number | null;
+    result?: any | null;
+    error?: JsonRpcError;
+  }> {
     if (!this.sessionManager) {
       throw new ProtocolError('Session manager not available');
     }
 
-    const params =
-      (request.params as SessionUpdateParams) || ({} as SessionUpdateParams);
+    const params: SessionUpdateParams =
+      (request.params as unknown as SessionUpdateParams) ||
+      ({} as SessionUpdateParams);
     if (!params.sessionId) {
       throw new ProtocolError('sessionId is required');
     }
 
-    // metadata is optional; default to empty object for backward compatibility
     await this.sessionManager.updateSession(
       params.sessionId,
       params.metadata || {}
     );
-    return {
+    return <
+      {
+        jsonrpc: '2.0';
+        id: string | number | null;
+        result?: any | null;
+        error?: JsonRpcError;
+      }
+    >{
       jsonrpc: '2.0',
       id: request.id,
       result: {
@@ -790,7 +1014,12 @@ export class CursorAgentAdapter {
     };
   }
 
-  private async handleSessionDelete(request: AcpRequest): Promise<AcpResponse> {
+  private async handleSessionDelete(request: Request | Request1): Promise<{
+    jsonrpc: '2.0';
+    id: string | number | null;
+    result?: any | null;
+    error?: JsonRpcError;
+  }> {
     if (!this.sessionManager) {
       throw new ProtocolError('Session manager not available');
     }
@@ -803,7 +1032,14 @@ export class CursorAgentAdapter {
 
     await this.sessionManager.deleteSession(params.sessionId);
 
-    return {
+    return <
+      {
+        jsonrpc: '2.0';
+        id: string | number | null;
+        result?: any | null;
+        error?: JsonRpcError;
+      }
+    >{
       jsonrpc: '2.0',
       id: request.id,
       result: {
@@ -813,20 +1049,30 @@ export class CursorAgentAdapter {
     };
   }
 
-  private async handleSessionPrompt(request: AcpRequest): Promise<AcpResponse> {
+  private async handleSessionPrompt(request: Request | Request1): Promise<{
+    jsonrpc: '2.0';
+    id: string | number | null;
+    result?: any | null;
+    error?: JsonRpcError;
+  }> {
     if (!this.promptHandler) {
       throw new ProtocolError('Prompt handler not available');
     }
     return this.promptHandler.processPrompt(request);
   }
 
-  private async handleSessionCancel(request: AcpRequest): Promise<AcpResponse> {
+  private async handleSessionCancel(request: Request | Request1): Promise<{
+    jsonrpc: '2.0';
+    id: string | number | null;
+    result?: any | null;
+    error?: JsonRpcError;
+  }> {
     if (!this.promptHandler) {
       throw new ProtocolError('Prompt handler not available');
     }
 
     const params =
-      (request.params as SessionCancelParams) || ({} as SessionCancelParams);
+      (request.params as CancelNotification) || ({} as CancelNotification);
     const sessionId = params.sessionId;
 
     if (!sessionId || typeof sessionId !== 'string') {
@@ -861,7 +1107,14 @@ export class CursorAgentAdapter {
         'Received session/cancel with id field - should be a notification per ACP spec',
         { sessionId, id: request.id }
       );
-      return {
+      return <
+        {
+          jsonrpc: '2.0';
+          id: string | number | null;
+          result?: any | null;
+          error?: JsonRpcError;
+        }
+      >{
         jsonrpc: '2.0',
         id: request.id,
         result: null,
@@ -871,21 +1124,40 @@ export class CursorAgentAdapter {
     // For proper notifications (no id), return a dummy response
     // This won't be sent to the client because processStdioMessage/HTTP handler
     // already checks isNotification() and skips sending responses for notifications
-    return {
+    return <
+      {
+        jsonrpc: '2.0';
+        id: string | number | null;
+        result?: any | null;
+        error?: JsonRpcError;
+      }
+    >{
       jsonrpc: '2.0',
       id: null,
       result: null,
     };
   }
 
-  private async handleToolsList(request: AcpRequest): Promise<AcpResponse> {
+  private async handleToolsList(request: Request | Request1): Promise<{
+    jsonrpc: '2.0';
+    id: string | number | null;
+    result?: any | null;
+    error?: JsonRpcError;
+  }> {
     if (!this.toolRegistry) {
       throw new ProtocolError('Tool registry not available');
     }
 
     const tools = this.toolRegistry.getTools();
 
-    return {
+    return <
+      {
+        jsonrpc: '2.0';
+        id: string | number | null;
+        result?: any | null;
+        error?: JsonRpcError;
+      }
+    >{
       jsonrpc: '2.0',
       id: request.id,
       result: {
@@ -898,12 +1170,18 @@ export class CursorAgentAdapter {
     };
   }
 
-  private async handleToolCall(request: AcpRequest): Promise<AcpResponse> {
+  private async handleToolCall(request: Request | Request1): Promise<{
+    jsonrpc: '2.0';
+    id: string | number | null;
+    result?: any | null;
+    error?: JsonRpcError;
+  }> {
     if (!this.toolRegistry) {
       throw new ProtocolError('Tool registry not available');
     }
 
-    const params = (request.params as ToolCallParams) || ({} as ToolCallParams);
+    const params =
+      (request.params as unknown as ToolCallParams) || ({} as ToolCallParams);
     if (!params.name) {
       throw new ProtocolError('tool name is required');
     }
@@ -913,7 +1191,7 @@ export class CursorAgentAdapter {
       params.parameters?.['sessionId'] || params.parameters?.['session_id'];
 
     const toolCall = {
-      id: request.id.toString(),
+      id: (request.id ?? 'unknown').toString(),
       name: params.name,
       parameters: params.parameters || {},
     };
@@ -926,7 +1204,14 @@ export class CursorAgentAdapter {
 
     // If the tool execution failed, return an error response
     if (!result.success) {
-      return {
+      return <
+        {
+          jsonrpc: '2.0';
+          id: string | number | null;
+          result?: any | null;
+          error?: JsonRpcError;
+        }
+      >{
         jsonrpc: '2.0',
         id: request.id,
         error: {
@@ -937,7 +1222,14 @@ export class CursorAgentAdapter {
       };
     }
 
-    return {
+    return <
+      {
+        jsonrpc: '2.0';
+        id: string | number | null;
+        result?: any | null;
+        error?: JsonRpcError;
+      }
+    >{
       jsonrpc: '2.0',
       id: request.id,
       result,
@@ -948,13 +1240,16 @@ export class CursorAgentAdapter {
    * Check if an ACP request is a notification (no response expected)
    * Per JSON-RPC 2.0 spec: Notifications are requests without an id field
    */
-  private isNotification(request: AcpRequest): boolean {
+  private isNotification(request: Request | Request1): boolean {
     return request.id === null || request.id === undefined;
   }
 
-  private async handleRequestPermission(
-    request: AcpRequest
-  ): Promise<AcpResponse> {
+  private async handleRequestPermission(request: Request | Request1): Promise<{
+    jsonrpc: '2.0';
+    id: string | number | null;
+    result?: any | null;
+    error?: JsonRpcError;
+  }> {
     if (!this.permissionsHandler) {
       throw new ProtocolError('Permissions handler not available');
     }

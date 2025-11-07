@@ -1,12 +1,245 @@
 /**
- * Type definitions for Cursor Agent ACP Adapter
+ * Internal type definitions for Cursor Agent ACP Adapter
  *
- * This file contains all the core type definitions used throughout the adapter.
+ * This file contains only internal implementation types.
+ * For ACP protocol types, import directly from '@agentclientprotocol/sdk'.
  */
 
+import type {
+  ContentBlock,
+  Role,
+  RequestPermissionRequest,
+} from '@agentclientprotocol/sdk';
+
 // ============================================================================
-// Core Adapter Types
+// Internal Implementation Types
 // ============================================================================
+
+export interface SessionMetadata {
+  name?: string;
+  title?: string;
+  description?: string;
+  tags?: string[];
+  projectPath?: string;
+  userId?: string;
+  cwd?: string; // Working directory for session
+  mcpServers?: any[]; // MCP server configurations
+  mode?: string; // Current session mode ID
+  model?: string; // Current session model ID
+  [key: string]: any;
+}
+
+export type SessionStatus = 'active' | 'inactive' | 'expired' | 'error';
+
+export interface SessionState {
+  lastActivity: Date;
+  messageCount: number;
+  tokenCount?: number;
+  status: SessionStatus;
+  currentMode?: string; // Current mode ID
+  currentModel?: string; // Current model ID
+}
+
+// ============================================================================
+// Session Modes
+// Per ACP spec: https://agentclientprotocol.com/protocol/session-modes
+// ============================================================================
+
+export interface SessionMode {
+  id: string;
+  name: string;
+  description: string;
+  systemPrompt?: string;
+  availableTools?: string[];
+  permissionBehavior?: 'strict' | 'permissive' | 'auto';
+}
+
+// ============================================================================
+// Session Models (UNSTABLE in ACP spec)
+// ============================================================================
+
+export interface SessionModel {
+  id: string;
+  name: string;
+  provider?: string;
+  contextWindow?: number;
+  capabilities?: string[];
+}
+
+export interface SessionInfo {
+  id: string;
+  metadata: SessionMetadata;
+  createdAt: Date;
+  updatedAt: Date;
+  status: SessionStatus;
+}
+
+export interface SessionData {
+  id: string;
+  metadata: SessionMetadata;
+  conversation: ConversationMessage[];
+  state: SessionState;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ConversationMessage {
+  id: string;
+  role: Role;
+  content: ContentBlock[];
+  timestamp: Date;
+  metadata?: Record<string, any>;
+}
+
+export interface SessionListParams {
+  limit?: number;
+  offset?: number;
+  filter?: SessionFilter;
+}
+
+export interface SessionFilter {
+  tags?: string[];
+  userId?: string;
+  startDate?: Date;
+  endDate?: Date;
+}
+
+export interface SessionListResult {
+  items: SessionSummary[];
+  total: number;
+  hasMore: boolean;
+}
+
+export interface SessionSummary {
+  id: string;
+  metadata: Partial<SessionMetadata>;
+  messageCount: number;
+  createdAt: Date;
+  updatedAt: Date;
+  lastMessageAt?: Date;
+}
+
+export interface SessionUpdateParams {
+  sessionId: string;
+  metadata?: Partial<SessionMetadata>;
+}
+
+export interface SessionDeleteParams {
+  sessionId: string;
+}
+
+export interface ToolCallParams {
+  name: string;
+  parameters?: Record<string, any>;
+}
+
+export interface ToolCall {
+  id: string;
+  name: string;
+  parameters: Record<string, any>;
+}
+
+export interface StreamChunk {
+  type: 'content' | 'progress' | 'error' | 'done';
+  data?: any;
+  error?: string;
+}
+
+export interface StreamProgress {
+  current: number;
+  total?: number;
+  message?: string;
+  step?: string;
+  progress?: number;
+}
+
+// Permission Outcome Type (internal)
+export type PermissionOutcome =
+  | { outcome: 'cancelled' }
+  | { outcome: 'selected'; optionId: string };
+
+export type RequestPermissionParams = RequestPermissionRequest;
+
+export interface Tool {
+  name: string;
+  description: string;
+  parameters: ToolParameters;
+  handler: ToolHandler;
+}
+
+export interface ToolParameters {
+  type: 'object';
+  properties: Record<string, ToolParameter>;
+  required?: string[];
+}
+
+export interface ToolParameter {
+  type: 'string' | 'number' | 'boolean' | 'array' | 'object';
+  description: string;
+  enum?: any[];
+  items?: ToolParameter;
+  properties?: Record<string, ToolParameter>;
+}
+
+export type ToolHandler = (params: Record<string, any>) => Promise<ToolResult>;
+
+export interface ToolResult {
+  success: boolean;
+  result?: any | undefined;
+  error?: string | undefined;
+  metadata?: Record<string, any> | undefined;
+}
+
+export interface ToolProvider {
+  name: string;
+  description: string;
+  getTools(): Tool[];
+}
+
+export interface CursorCommand {
+  command: string[];
+  options?: CursorCommandOptions;
+}
+
+export interface CursorCommandOptions {
+  cwd?: string;
+  timeout?: number;
+  env?: Record<string, string>;
+  input?: string;
+  session?: string;
+}
+
+export interface CursorResponse {
+  success: boolean;
+  stdout?: string | undefined;
+  stderr?: string | undefined;
+  exitCode?: number | undefined;
+  error?: string | undefined;
+  metadata?: Record<string, any> | undefined;
+}
+
+export interface CursorSession {
+  id: string;
+  status: 'active' | 'inactive' | 'error';
+  lastActivity: Date;
+  metadata?: Record<string, any>;
+}
+
+export interface CursorAuthStatus {
+  authenticated: boolean;
+  userId?: string;
+  user?: string;
+  email?: string;
+  plan?: string;
+  error?: string;
+}
+
+export interface Logger {
+  error(message: string, meta?: any): void;
+  warn(message: string, meta?: any): void;
+  info(message: string, meta?: any): void;
+  debug(message: string, meta?: any): void;
+}
 
 export interface AdapterConfig {
   logLevel: 'error' | 'warn' | 'info' | 'debug';
@@ -41,366 +274,30 @@ export interface AdapterOptions {
   logger?: Logger;
 }
 
-// ============================================================================
-// ACP Protocol Types (JSON-RPC 2.0)
-// ============================================================================
-
-export interface AcpRequest {
-  jsonrpc: '2.0';
-  method: string;
-  params?: Record<string, any>;
-  id: string | number;
+export interface ValidationResult {
+  valid: boolean;
+  errors: string[];
 }
 
-export interface AcpResponse {
-  jsonrpc: '2.0';
-  result?: any;
-  error?: AcpError;
-  id: string | number | null;
-}
-
-export interface AcpNotification {
-  jsonrpc: '2.0';
-  method: string;
-  params?: Record<string, any>;
-}
-
-export interface AcpError {
-  code: number;
-  message: string;
-  data?: any;
-}
-
-// ============================================================================
-// Session Types
-// ============================================================================
-
-export interface SessionInfo {
-  id: string;
-  metadata: SessionMetadata;
-  createdAt: Date;
-  updatedAt: Date;
-  status: SessionStatus;
-}
-
-export interface SessionMetadata {
-  name?: string;
-  title?: string;
-  description?: string;
-  tags?: string[];
-  projectPath?: string;
-  userId?: string;
-  [key: string]: any;
-}
-
-export interface SessionData {
-  id: string;
-  metadata: SessionMetadata;
-  conversation: ConversationMessage[];
-  state: SessionState;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface ConversationMessage {
-  id: string;
-  role: 'user' | 'assistant' | 'system';
-  content: ContentBlock[];
-  timestamp: Date;
-  metadata?: Record<string, any> | undefined;
-}
-
-export type SessionStatus = 'active' | 'inactive' | 'expired' | 'error';
-
-export interface SessionState {
-  lastActivity: Date;
-  messageCount: number;
-  tokenCount?: number;
-  currentTool?: string;
-  context?: Record<string, any>;
-}
-
-// ============================================================================
-// Content Types
-// ============================================================================
-
-// Per ACP spec: Annotations for content blocks
-export interface Annotations {
-  audience?: ('user' | 'assistant')[];
-  priority?: number;
-  [key: string]: any; // Extensible for custom fields
-}
-
-export type ContentBlock =
-  | TextContentBlock
-  | CodeContentBlock
-  | ImageContentBlock
-  | AudioContentBlock
-  | EmbeddedResourceContentBlock
-  | ResourceLinkContentBlock;
-
-// Per ACP spec: Text content uses 'text' field
-export interface TextContentBlock {
-  type: 'text';
-  text: string; // Per ACP spec: use 'text' not 'value'
-  value?: string; // Deprecated: for backward compatibility
-  annotations?: Annotations;
-  metadata?: Record<string, any>; // Deprecated: use annotations
-}
-
-// Custom extension: Code as separate type (not in ACP spec)
-// ACP spec recommends using text with annotations, but we keep this for convenience
-export interface CodeContentBlock {
-  type: 'code';
-  value: string; // The code content as a string.
-  language?: string;
-  filename?: string;
-  annotations?: Annotations;
-  metadata?: Record<string, any>; // Deprecated: use annotations
-}
-
-// Per ACP spec: Image content uses 'data' field
-export interface ImageContentBlock {
-  type: 'image';
-  data: string; // Per ACP spec: use 'data' not 'value' (base64 encoded)
-  value?: string; // Deprecated: for backward compatibility
-  mimeType: string;
-  uri?: string; // Optional: source URI
-  filename?: string; // Extension: not in spec
-  annotations?: Annotations;
-  metadata?: Record<string, any>; // Deprecated: use annotations
-}
-
-// Per ACP spec: Audio content
-export interface AudioContentBlock {
-  type: 'audio';
-  data: string; // Base64-encoded audio data
-  mimeType: string; // e.g., "audio/wav", "audio/mp3"
-  annotations?: Annotations;
-}
-
-// Per ACP spec: Embedded resource (preferred way to include context)
-export interface EmbeddedResourceContentBlock {
-  type: 'resource';
-  resource: {
-    uri: string;
-    mimeType?: string;
-  } & (
-    | { text: string } // Text resource
-    | { blob: string } // Binary resource (base64)
-  );
-  annotations?: Annotations;
-}
-
-// Per ACP spec: Resource link
-export interface ResourceLinkContentBlock {
-  type: 'resource_link';
-  uri: string;
-  name: string;
-  mimeType?: string;
-  title?: string;
-  description?: string;
-  size?: number;
-  annotations?: Annotations;
-}
-
-// ============================================================================
-// Tool Types
-// ============================================================================
-
-export interface Tool {
-  name: string;
-  description: string;
-  parameters: ToolParameters;
-  handler: ToolHandler;
-}
-
-export interface ToolParameters {
-  type: 'object';
-  properties: Record<string, ToolParameter>;
-  required?: string[];
-}
-
-export interface ToolParameter {
+export interface ConfigValidationRule {
+  path: string;
   type: 'string' | 'number' | 'boolean' | 'array' | 'object';
-  description: string;
-  enum?: any[];
-  items?: ToolParameter;
-  properties?: Record<string, ToolParameter>;
+  required?: boolean;
+  min?: number;
+  max?: number;
+  pattern?: RegExp;
+  validator?: (value: any) => boolean;
 }
 
-export type ToolHandler = (params: Record<string, any>) => Promise<ToolResult>;
-
-export interface ToolCall {
-  id: string;
-  name: string;
-  parameters: Record<string, any>;
-}
-
-export interface ToolCallParams {
-  name: string;
-  parameters?: Record<string, any>;
-}
-
-export interface ToolResult {
+export interface ConnectivityTestResult {
   success: boolean;
-  result?: any | undefined;
-  error?: string | undefined;
-  metadata?: Record<string, any> | undefined;
-}
-
-export interface ToolProvider {
-  name: string;
-  description: string;
-  getTools(): Tool[];
-}
-
-// ============================================================================
-// ACP Tool Call Types (per ACP spec)
-// ============================================================================
-
-// Per ACP spec: Tool kinds for categorizing tool operations
-export type ToolKind =
-  | 'read' // Reading files or data
-  | 'edit' // Modifying files or content
-  | 'delete' // Removing files or data
-  | 'move' // Moving or renaming files
-  | 'search' // Searching for information
-  | 'execute' // Running commands or code
-  | 'think' // Internal reasoning or planning
-  | 'fetch' // Retrieving external data
-  | 'other'; // Other tool types (default)
-
-// Per ACP spec: Tool call execution status
-export type ToolCallStatus =
-  | 'pending' // Tool call hasn't started yet (awaiting input/approval)
-  | 'in_progress' // Tool call is currently running
-  | 'completed' // Tool call completed successfully
-  | 'failed'; // Tool call failed with an error
-
-// Per ACP spec: File location for tool calls
-export interface ToolCallLocation {
-  path: string; // Absolute file path
-  line?: number; // Optional line number within the file
-}
-
-// Per ACP spec: Diff content for file modifications
-export interface ToolCallDiffContent {
-  type: 'diff';
-  path: string; // Absolute file path being modified
-  oldText: string | null; // Original content (null for new files)
-  newText: string; // New content after modification
-}
-
-// Per ACP spec: Terminal output content
-export interface ToolCallTerminalContent {
-  type: 'terminal';
-  terminalId: string; // ID of a terminal created with terminal/create
-}
-
-// Per ACP spec: Regular content block wrapper
-export interface ToolCallRegularContent {
-  type: 'content';
-  content: ContentBlock; // Any standard content block (text, image, etc.)
-}
-
-// Per ACP spec: Tool call content types
-export type ToolCallContent =
-  | ToolCallRegularContent
-  | ToolCallDiffContent
-  | ToolCallTerminalContent;
-
-// Per ACP spec: Tool call update structure
-export interface ToolCallUpdate {
-  toolCallId: string; // Unique identifier for this tool call
-  title?: string; // Human-readable description of what the tool is doing
-  kind?: ToolKind; // Category of tool being invoked
-  status?: ToolCallStatus; // Current execution status
-  content?: ToolCallContent[]; // Content produced by the tool call
-  locations?: ToolCallLocation[]; // File locations affected by this tool call
-  rawInput?: Record<string, any>; // Raw input parameters sent to the tool
-  rawOutput?: Record<string, any>; // Raw output returned by the tool
-}
-
-// Per ACP spec: Permission option kinds
-export type PermissionOptionKind =
-  | 'allow_once' // Allow this operation only this time
-  | 'allow_always' // Allow this operation and remember the choice
-  | 'reject_once' // Reject this operation only this time
-  | 'reject_always'; // Reject this operation and remember the choice
-
-// Per ACP spec: Permission option
-export interface PermissionOption {
-  optionId: string; // Unique identifier for this option
-  name: string; // Human-readable label to display to the user
-  kind: PermissionOptionKind; // Hint for appropriate UI treatment
-}
-
-// Per ACP spec: Permission request outcome
-export type PermissionOutcome =
-  | {
-      outcome: 'cancelled'; // Prompt turn was cancelled
-    }
-  | {
-      outcome: 'selected'; // User selected an option
-      optionId: string; // The ID of the selected option
-    };
-
-// Per ACP spec: Permission request params
-export interface RequestPermissionParams {
-  sessionId: string; // The session ID for this request
-  toolCall: ToolCallUpdate; // The tool call details
-  options: PermissionOption[]; // Available permission options
-}
-
-// Per ACP spec: Permission request result
-export interface RequestPermissionResult {
-  outcome: PermissionOutcome; // The user's decision
-}
-
-// ============================================================================
-// Cursor CLI Types
-// ============================================================================
-
-export interface CursorCommand {
-  command: string[];
-  options?: CursorCommandOptions;
-}
-
-export interface CursorCommandOptions {
-  cwd?: string;
-  timeout?: number;
-  env?: Record<string, string>;
-  input?: string;
-  session?: string;
-}
-
-export interface CursorResponse {
-  success: boolean;
-  stdout?: string;
-  stderr?: string;
-  exitCode?: number;
-  error?: string;
-  metadata?: Record<string, any>;
-}
-
-export interface CursorSession {
-  id: string;
-  status: 'active' | 'inactive' | 'error';
-  lastActivity: Date;
-  metadata?: Record<string, any>;
-}
-
-export interface CursorAuthStatus {
-  authenticated: boolean;
-  user?: string;
-  email?: string;
-  plan?: string;
+  version?: string;
+  authenticated?: boolean;
   error?: string;
 }
 
 // ============================================================================
-// Error Types
+// Error Classes
 // ============================================================================
 
 export class AdapterError extends Error {
@@ -432,326 +329,29 @@ export class CursorError extends AdapterError {
 }
 
 export class SessionError extends AdapterError {
-  readonly sessionId?: string;
+  readonly sessionId?: string | undefined;
 
-  constructor(message: string, sessionId?: string, cause?: Error) {
+  constructor(
+    message: string,
+    sessionId?: string | undefined,
+    cause?: Error | undefined
+  ) {
     super(message, 'SESSION_ERROR', cause);
     this.name = 'SessionError';
-    if (sessionId) {
-      this.sessionId = sessionId;
-    }
+    this.sessionId = sessionId;
   }
 }
 
 export class ToolError extends AdapterError {
-  readonly toolName?: string;
+  readonly toolName?: string | undefined;
 
-  constructor(message: string, toolName?: string, cause?: Error) {
+  constructor(
+    message: string,
+    toolName?: string | undefined,
+    cause?: Error | undefined
+  ) {
     super(message, 'TOOL_ERROR', cause);
     this.name = 'ToolError';
-    if (toolName) {
-      this.toolName = toolName;
-    }
+    this.toolName = toolName;
   }
-}
-
-// ============================================================================
-// Utility Types
-// ============================================================================
-
-export interface Logger {
-  error(message: string, ...args: any[]): void;
-  warn(message: string, ...args: any[]): void;
-  info(message: string, ...args: any[]): void;
-  debug(message: string, ...args: any[]): void;
-}
-
-export interface ValidationResult {
-  valid: boolean;
-  errors: string[];
-}
-
-export interface ConnectivityTestResult {
-  success: boolean;
-  version?: string;
-  authenticated?: boolean;
-  error?: string;
-}
-
-// ============================================================================
-// ACP Method Types
-// ============================================================================
-
-// Per ACP spec: https://agentclientprotocol.com/protocol/initialization
-export interface InitializeParams {
-  protocolVersion: number; // REQUIRED per ACP spec: protocol versions are integers (1, 2, etc.)
-  clientCapabilities?: ClientCapabilities; // OPTIONAL but SHOULD be provided per ACP spec
-  clientInfo?: {
-    // OPTIONAL but SHOULD be provided per ACP spec
-    name: string; // REQUIRED if clientInfo provided
-    title?: string; // OPTIONAL: human-readable display name
-    version: string; // REQUIRED if clientInfo provided
-  };
-}
-
-export interface InitializeResult {
-  protocolVersion: number; // ACP spec: must match or negotiate down from client's version
-  agentCapabilities: AgentCapabilities; // ACP spec: use "agentCapabilities" not "capabilities"
-  agentInfo: {
-    // ACP spec: use "agentInfo" not "serverInfo" (this is an Agent)
-    // Required (will be required in future protocol versions)
-    name: string;
-    title?: string; // Optional: human-readable display name
-    version: string;
-  };
-  authMethods: string[]; // ACP spec: array of supported auth methods (empty if none)
-}
-
-// Per ACP spec: Client capabilities
-export interface ClientCapabilities {
-  fs?: {
-    readTextFile?: boolean; // fs/read_text_file method available
-    writeTextFile?: boolean; // fs/write_text_file method available
-  };
-  terminal?: boolean; // All terminal/* methods available
-  _meta?: Record<string, any>; // Custom capability extensions
-}
-
-// Per ACP spec: Agent capabilities
-export interface AgentCapabilities {
-  loadSession?: boolean; // session/load method available (default: false)
-  promptCapabilities?: PromptCapabilities;
-  mcpCapabilities?: McpCapabilities; // Per ACP spec: use "mcpCapabilities" not "mcp"
-  _meta?: Record<string, any>; // Custom capability extensions
-}
-
-// Per ACP spec: Prompt content capabilities
-export interface PromptCapabilities {
-  image?: boolean; // ContentBlock::Image supported (default: false)
-  audio?: boolean; // ContentBlock::Audio supported (default: false)
-  embeddedContext?: boolean; // ContentBlock::Resource supported (default: false)
-}
-
-// Per ACP spec: MCP server connection capabilities
-export interface McpCapabilities {
-  http?: boolean; // Connect to MCP servers over HTTP (default: false)
-  sse?: boolean; // Connect to MCP servers over SSE (default: false, deprecated)
-}
-
-// Legacy type for backward compatibility
-export interface ServerCapabilities extends AgentCapabilities {
-  // Deprecated fields for backward compatibility
-  sessionManagement?: boolean;
-  streaming?: boolean;
-  toolCalling?: boolean;
-  fileSystem?: boolean;
-  terminal?: boolean;
-  contentTypes?: string[];
-}
-
-// ============================================================================
-// MCP Server Configuration Types
-// ============================================================================
-
-// Per ACP spec: Environment variable for MCP server
-export interface McpEnvVariable {
-  name: string; // The name of the environment variable
-  value: string; // The value of the environment variable
-}
-
-// Per ACP spec: HTTP header for HTTP/SSE transports
-export interface McpHttpHeader {
-  name: string; // The name of the HTTP header
-  value: string; // The value to set for the HTTP header
-}
-
-// Per ACP spec: Stdio transport configuration (default, all agents MUST support)
-export interface McpStdioServerConfig {
-  name: string; // Human-readable identifier for the server
-  command: string; // Absolute path to the MCP server executable
-  args: string[]; // Command-line arguments to pass to the server
-  env?: McpEnvVariable[]; // Optional environment variables
-}
-
-// Per ACP spec: HTTP transport configuration (optional capability)
-export interface McpHttpServerConfig {
-  type: 'http'; // Must be "http" to indicate HTTP transport
-  name: string; // Human-readable identifier for the server
-  url: string; // The URL of the MCP server
-  headers: McpHttpHeader[]; // HTTP headers to include in requests
-}
-
-// Per ACP spec: SSE transport configuration (optional capability, deprecated)
-export interface McpSseServerConfig {
-  type: 'sse'; // Must be "sse" to indicate SSE transport
-  name: string; // Human-readable identifier for the server
-  url: string; // The URL of the SSE endpoint
-  headers: McpHttpHeader[]; // HTTP headers for establishing SSE connection
-}
-
-// Union type for all MCP server configurations
-export type McpServerConfig =
-  | McpStdioServerConfig
-  | McpHttpServerConfig
-  | McpSseServerConfig;
-
-export interface SessionNewParams {
-  cwd: string; // Per ACP spec: absolute path to working directory
-  mcpServers: McpServerConfig[]; // Array of MCP server configs
-  metadata?: Partial<SessionMetadata>; // Optional: session metadata (name, description, tags, etc.)
-}
-
-export interface SessionNewResult {
-  sessionId: string; // Required per ACP spec
-  modes?: SessionModeState | null; // Optional per ACP spec
-  models?: SessionModelState | null; // Optional per ACP spec
-}
-
-// ACP spec types for session modes
-export interface SessionModeState {
-  currentModeId: string;
-  availableModes: SessionMode[];
-}
-
-export interface SessionMode {
-  id: string;
-  name: string;
-  description?: string | null;
-}
-
-// ACP spec types for session models
-export interface SessionModelState {
-  currentModelId: string;
-  availableModels: ModelInfo[];
-}
-
-export interface ModelInfo {
-  modelId: string;
-  name: string;
-  description?: string | null;
-}
-
-export interface SessionLoadParams {
-  sessionId: string; // Required: session to resume
-  cwd: string; // Required: absolute path to working directory
-  mcpServers: McpServerConfig[]; // Required: MCP servers to connect to
-}
-
-// Per ACP spec: After streaming all conversation via session/update notifications,
-// the session/load response should return null
-export type SessionLoadResult = null;
-
-export interface SessionListParams {
-  limit?: number;
-  offset?: number;
-  filter?: Record<string, any>;
-}
-
-export interface SessionListResult {
-  sessions: SessionInfo[];
-  total: number;
-  hasMore: boolean;
-}
-
-export interface SessionUpdateParams {
-  sessionId: string;
-  metadata: Partial<SessionMetadata>;
-}
-
-export interface SessionUpdateResult {
-  sessionId: string;
-  metadata: SessionMetadata;
-}
-
-export interface SessionDeleteParams {
-  sessionId: string;
-}
-
-export interface SessionDeleteResult {
-  sessionId: string;
-  deleted: boolean;
-}
-
-export interface SessionPromptParams {
-  sessionId: string;
-  content: ContentBlock[];
-  stream?: boolean;
-  metadata?: Record<string, any>;
-}
-
-export interface SessionCancelParams {
-  sessionId: string; // Required: session to cancel
-}
-
-export interface MessagePart {
-  content: string;
-  content_type: string; // e.g., "text/plain", "application/json" (snake_case per ACP spec)
-  content_encoding?: 'plain' | 'base64'; // Optional encoding
-  name?: string; // Optional: makes this part an Artifact
-  metadata?: Record<string, any>; // Optional: additional context
-}
-
-export interface AgentMessage {
-  role: 'agent' | `agent/${string}`; // Supports "agent" or "agent/{name}" format
-  parts: MessagePart[];
-}
-
-export interface SessionPromptResult {
-  stopReason:
-    | 'end_turn'
-    | 'max_tokens'
-    | 'max_turn_requests'
-    | 'refusal'
-    | 'cancelled'; // Required per ACP spec - indicates why agent stopped processing
-}
-
-// ============================================================================
-// Stream Types
-// ============================================================================
-
-export interface StreamChunk {
-  type: 'content' | 'metadata' | 'error' | 'done';
-  data: any;
-}
-
-export interface StreamProgress {
-  step: string;
-  progress: number;
-  total?: number;
-  message?: string;
-}
-
-// ============================================================================
-// Configuration Validation Types
-// ============================================================================
-
-export interface ConfigValidationRule {
-  path: string;
-  type: 'string' | 'number' | 'boolean' | 'array' | 'object';
-  required?: boolean;
-  min?: number;
-  max?: number;
-  pattern?: RegExp;
-  validator?: (value: any) => boolean;
-}
-
-// ============================================================================
-// Transport Types
-// ============================================================================
-
-export interface TransportMessage {
-  content: string;
-  timestamp: Date;
-}
-
-export interface StdioTransport {
-  send(message: string): Promise<void>;
-  onMessage(handler: (message: string) => void): void;
-  close(): Promise<void>;
-}
-
-export interface HttpTransport {
-  port: number;
-  start(): Promise<void>;
-  stop(): Promise<void>;
 }

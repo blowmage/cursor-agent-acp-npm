@@ -97,7 +97,7 @@ describe('PromptHandler', () => {
         content: [
           {
             type: 'text',
-            value: 'Hello, how can you help me with TypeScript?',
+            text: 'Hello, how can you help me with TypeScript?',
           },
         ],
         stream: false,
@@ -131,6 +131,7 @@ describe('PromptHandler', () => {
 
         expect(response.jsonrpc).toBe('2.0');
         expect(response.id).toBe('test-request-1');
+        expect(response.error).toBeUndefined();
         expect(response.result).toBeDefined();
         // Per ACP spec, session/prompt returns immediately with empty result
         // Content is sent via session/update notifications asynchronously
@@ -317,7 +318,7 @@ describe('PromptHandler', () => {
           method: 'session/prompt',
           id: 'test-request-1',
           params: {
-            content: [{ type: 'text', value: 'Hello' }],
+            content: [{ type: 'text', text: 'Hello' }],
           },
         };
 
@@ -370,7 +371,7 @@ describe('PromptHandler', () => {
           ...validRequest,
           params: {
             ...validRequest.params,
-            content: [{ type: 'text', value: 'Hello world' }],
+            content: [{ type: 'text', text: 'Hello world' }],
           },
         };
 
@@ -384,17 +385,19 @@ describe('PromptHandler', () => {
         expect(response.error).toBeUndefined();
       });
 
-      it('should accept valid code content', async () => {
+      it('should accept valid code content as embedded resource', async () => {
         const request: AcpRequest = {
           ...validRequest,
           params: {
             ...validRequest.params,
             content: [
               {
-                type: 'code',
-                value: 'console.log("hello");',
-                language: 'javascript',
-                filename: 'test.js',
+                type: 'resource',
+                resource: {
+                  uri: 'file:///test.js',
+                  mimeType: 'text/javascript',
+                  text: 'console.log("hello");',
+                },
               },
             ],
           },
@@ -418,10 +421,9 @@ describe('PromptHandler', () => {
             content: [
               {
                 type: 'image',
-                value:
-                  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+                data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
                 mimeType: 'image/png',
-                filename: 'test.png',
+                uri: 'test.png',
               },
             ],
           },
@@ -553,7 +555,7 @@ describe('PromptHandler', () => {
           content: [
             {
               type: 'text',
-              value: 'Hello, how can you help me with TypeScript?',
+              text: 'Hello, how can you help me with TypeScript?',
             },
           ],
           stream: false,
@@ -606,7 +608,7 @@ describe('PromptHandler', () => {
           content: [
             {
               type: 'text',
-              value: 'Hello, how can you help me with TypeScript?',
+              text: 'Hello, how can you help me with TypeScript?',
             },
           ],
           stream: false,
@@ -621,9 +623,12 @@ describe('PromptHandler', () => {
           content: [
             { type: 'text', text: 'Here is some code:' },
             {
-              type: 'code',
-              value: 'const x = 42;',
-              language: 'typescript',
+              type: 'resource',
+              resource: {
+                uri: 'file:///example.ts',
+                mimeType: 'text/typescript',
+                text: 'const x = 42;',
+              },
             },
             { type: 'text', text: 'What do you think?' },
           ],
@@ -654,7 +659,11 @@ describe('PromptHandler', () => {
       // Verify content was processed
       const sendPromptCall = mockCursorBridge.sendPrompt.mock.calls[0][0];
       expect(sendPromptCall.content.value).toContain('Here is some code:');
-      expect(sendPromptCall.content.value).toContain('```typescript');
+      // Resources are formatted with headers, not code fences
+      expect(sendPromptCall.content.value).toContain(
+        '# Resource: file:///example.ts'
+      );
+      expect(sendPromptCall.content.value).toContain('# Type: text/typescript');
       expect(sendPromptCall.content.value).toContain('const x = 42;');
       expect(sendPromptCall.content.value).toContain('What do you think?');
     });

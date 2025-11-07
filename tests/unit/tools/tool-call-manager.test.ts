@@ -71,7 +71,9 @@ describe('ToolCallManager', () => {
       });
 
       expect(sentNotifications).toHaveLength(1);
-      expect(sentNotifications[0]!).toEqual({
+      // Now includes _meta fields
+      // Defaults to in_progress
+      expect(sentNotifications[0]!).toMatchObject({
         jsonrpc: '2.0',
         method: 'session/update',
         params: {
@@ -81,11 +83,26 @@ describe('ToolCallManager', () => {
             toolCallId,
             title: 'Searching codebase',
             kind: 'search',
-            status: 'pending',
+            status: 'in_progress',
             rawInput: { query: 'test' },
+            _meta: {
+              toolName: 'search',
+              source: 'tool-call-manager',
+            },
+          },
+          _meta: {
+            notificationSequence: expect.any(Number),
           },
         },
       });
+
+      // Verify timestamps exist and are ISO strings
+      expect(sentNotifications[0]!.params.update._meta.startTime).toMatch(
+        /^\d{4}-\d{2}-\d{2}T/
+      );
+      expect(sentNotifications[0]!.params._meta.timestamp).toMatch(
+        /^\d{4}-\d{2}-\d{2}T/
+      );
     });
 
     it('should include locations if provided', async () => {
@@ -105,13 +122,14 @@ describe('ToolCallManager', () => {
       });
     });
 
-    it('should default to pending status', async () => {
+    it('should default to in_progress status', async () => {
+      // Changed default from pending to in_progress
       await manager.reportToolCall('session1', 'test', {
         title: 'Test',
         kind: 'other',
       });
 
-      expect(sentNotifications[0]!.params.update.status).toBe('pending');
+      expect(sentNotifications[0]!.params.update.status).toBe('in_progress');
     });
 
     it('should allow custom initial status', async () => {
@@ -140,7 +158,8 @@ describe('ToolCallManager', () => {
       });
 
       expect(sentNotifications).toHaveLength(1);
-      expect(sentNotifications[0]!).toEqual({
+      // Now includes _meta fields
+      expect(sentNotifications[0]!).toMatchObject({
         jsonrpc: '2.0',
         method: 'session/update',
         params: {
@@ -150,9 +169,23 @@ describe('ToolCallManager', () => {
             toolCallId,
             status: 'in_progress',
             title: 'Updated title',
+            _meta: {
+              source: 'tool-call-manager',
+            },
+          },
+          _meta: {
+            notificationSequence: expect.any(Number),
           },
         },
       });
+
+      // Verify timestamps
+      expect(sentNotifications[0]!.params.update._meta.updateTime).toMatch(
+        /^\d{4}-\d{2}-\d{2}T/
+      );
+      expect(sentNotifications[0]!.params._meta.timestamp).toMatch(
+        /^\d{4}-\d{2}-\d{2}T/
+      );
     });
 
     it('should only include provided fields in update', async () => {
@@ -535,7 +568,7 @@ describe('ToolCallManager', () => {
         toolCallId,
         sessionId: 'session1',
         toolName: 'test',
-        status: 'pending',
+        status: 'in_progress', // Phase 3: Default changed to in_progress
       });
       expect(info?.startTime).toBeInstanceOf(Date);
     });

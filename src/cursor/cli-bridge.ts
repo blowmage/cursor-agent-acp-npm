@@ -693,6 +693,7 @@ export class CursorCliBridge {
           if (onProgress) {
             onProgress({
               step: 'streaming',
+              current: processedChunks,
               progress: processedChunks,
               message: `Received chunk ${processedChunks}`,
             });
