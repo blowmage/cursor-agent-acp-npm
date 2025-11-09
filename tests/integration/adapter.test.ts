@@ -20,6 +20,10 @@ import type {
   Logger,
 } from '../../src/types';
 import { MockCursorCliBridge } from './mocks/cursor-bridge-mock';
+import { FilesystemToolProvider } from '../../src/tools/filesystem';
+import { AcpFileSystemClient } from '../../src/client/filesystem-client';
+import type { ClientCapabilities } from '@agentclientprotocol/sdk';
+import { promises as fs } from 'fs';
 
 // Mock the CursorCliBridge module
 jest.mock('../../src/cursor/cli-bridge', () => ({
@@ -47,7 +51,7 @@ const testConfig: AdapterConfig = {
   sessionTimeout: 60000, // Minimum 1 minute required by validation
   tools: {
     filesystem: {
-      enabled: true,
+      enabled: false, // Disabled in config, manually registered in beforeEach
       allowedPaths: ['/tmp', './'],
     },
     terminal: {
@@ -68,6 +72,80 @@ describe('CursorAgentAdapter Integration', () => {
     jest.clearAllMocks();
     adapter = new CursorAgentAdapter(testConfig, { logger: mockLogger });
     await adapter.initialize();
+
+    // Register filesystem tools with mock client (per ACP architecture)
+    const mockClientCapabilities: ClientCapabilities = {
+      fs: {
+        readTextFile: true,
+        writeTextFile: true,
+      },
+    };
+
+    // Create mock filesystem client for integration tests
+    const mockFileSystemClient = new AcpFileSystemClient(
+      {
+        async readTextFile(params: any) {
+          // Validate path is within allowed paths (simulating client-side security)
+          const allowedPaths = testConfig.tools.filesystem.allowedPaths || [];
+          const isAllowed = allowedPaths.some((allowed) =>
+            params.path.startsWith(allowed)
+          );
+          if (!isAllowed) {
+            throw new Error(`Access to ${params.path} is not allowed`);
+          }
+          // Use local fs for integration tests
+          const content = await fs.readFile(params.path, 'utf-8');
+          return { content };
+        },
+        async writeTextFile(params: any) {
+          // Validate path is within allowed paths (simulating client-side security)
+          const allowedPaths = testConfig.tools.filesystem.allowedPaths || [];
+          const isAllowed = allowedPaths.some((allowed) =>
+            params.path.startsWith(allowed)
+          );
+          if (!isAllowed) {
+            throw new Error(`Access to ${params.path} is not allowed`);
+          }
+          // Use local fs for integration tests
+          await fs.writeFile(params.path, params.content, 'utf-8');
+          return {};
+        },
+        async requestPermission() {
+          return { outcome: 'approve' as const };
+        },
+        async createTerminal() {
+          return { id: 'mock-terminal' };
+        },
+      },
+      mockLogger
+    );
+
+    const filesystemProvider = new FilesystemToolProvider(
+      {
+        ...testConfig,
+        tools: {
+          ...testConfig.tools,
+          filesystem: {
+            ...testConfig.tools.filesystem,
+            enabled: true, // Enable for provider (even though disabled in adapter config)
+          },
+        },
+      },
+      mockLogger,
+      mockClientCapabilities,
+      mockFileSystemClient
+    );
+
+    // Verify provider has tools before registering
+    const providerTools = filesystemProvider.getTools();
+    expect(providerTools.length).toBeGreaterThan(0);
+    expect(providerTools.some((t) => t.name === 'read_file')).toBe(true);
+
+    // Access the tool registry from the adapter to register filesystem provider
+    const toolRegistry = (adapter as any).toolRegistry;
+    if (toolRegistry) {
+      toolRegistry.registerProvider(filesystemProvider);
+    }
   });
 
   afterEach(async () => {
@@ -702,6 +780,7 @@ describe('CursorAgentAdapter Integration', () => {
             parameters: {
               path: '/tmp/test-file.txt',
               content: 'Hello from integration test',
+              _sessionId: 'test-session',
             },
           },
         };
@@ -760,6 +839,7 @@ describe('CursorAgentAdapter Integration', () => {
             name: 'read_file',
             parameters: {
               // Missing required 'path' parameter
+              _sessionId: 'test-session',
             },
           },
         };

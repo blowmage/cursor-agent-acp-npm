@@ -66,6 +66,7 @@ export interface PlanEntry {
 export interface PromptProcessingConfig {
   echoUserMessages?: boolean; // Echo user messages via user_message_chunk
   sendPlan?: boolean; // Send plan notifications (if multi-step processing)
+  reportToolCalls?: boolean; // Report tool call lifecycle via tool_call notifications
   collectDetailedMetrics?: boolean; // Collect comprehensive metrics
   annotateContent?: boolean; // Add annotations to content blocks
   markInternalContent?: boolean; // Mark assistant-only content
@@ -91,9 +92,42 @@ export interface ToolCallInfo {
   content?: ContentBlock[];
 }
 
-// Note: PromptMetrics interface removed as it's not currently used.
-// When detailed metrics collection is implemented, define the structure inline
-// or create a new interface. See PROMPT_TURN_IMPROVEMENTS_IMPLEMENTED.md for details.
+// Comprehensive metrics for prompt processing
+export interface PromptMetrics {
+  // Timing
+  startTime: number;
+  endTime: number;
+  totalDurationMs: number;
+  cursorProcessingMs?: number;
+  contentProcessingMs?: number;
+  streamingDurationMs?: number;
+
+  // Content
+  inputBlocks: number;
+  inputSize: number;
+  outputBlocks: number;
+  outputSize: number;
+  contentTypes: Record<string, number>; // Count by type
+
+  // Tool usage
+  toolCallsInitiated: number;
+  toolCallsCompleted: number;
+  toolCallsFailed: number;
+  toolCallDurations: Record<string, number>; // Tool name -> duration
+
+  // Streaming (if applicable)
+  chunksStreamed?: number;
+  averageChunkSize?: number;
+  streamingLatency?: number; // Time to first chunk
+
+  // Session
+  heartbeatsSent: number;
+  sessionMessageCount: number;
+
+  // Performance
+  peakMemoryMb?: number;
+  avgCpuPercent?: number;
+}
 
 export class PromptHandler {
   private readonly sessionManager: SessionManager;
@@ -118,6 +152,7 @@ export class PromptHandler {
   private readonly processingConfig: PromptProcessingConfig = {
     echoUserMessages: true,
     sendPlan: false, // Disabled by default (requires multi-step planning)
+    reportToolCalls: true, // Enabled by default for ACP compliance
     collectDetailedMetrics: true,
     annotateContent: true, // Enabled by default
     markInternalContent: false, // Disabled (most content is user-facing)
@@ -162,17 +197,29 @@ export class PromptHandler {
   }
 
   /**
-   * Determine the appropriate stop reason based on execution context
-   * Per ACP spec: Returns one of 5 valid stop reasons
+   * Determine the appropriate stop reason based on execution context with detailed metadata
+   * Per ACP spec: Returns one of 5 valid stop reasons with rich context
    */
   private determineStopReason(
     error: Error | null,
     aborted: boolean,
     responseMetadata?: Record<string, any>
-  ): PromptResponse['stopReason'] {
+  ): {
+    stopReason: PromptResponse['stopReason'];
+    stopReasonDetails?: Record<string, any>;
+  } {
     // Cancelled by client via session/cancel
     if (aborted) {
-      return STOP_REASON.CANCELLED;
+      return {
+        stopReason: STOP_REASON.CANCELLED,
+        stopReasonDetails: {
+          cancelledAt: new Date().toISOString(),
+          cancelMethod: 'session/cancel',
+          ...(responseMetadata?.['cancelReason'] && {
+            reason: responseMetadata['cancelReason'],
+          }),
+        },
+      };
     }
 
     // Check for token limit reached from Cursor response
@@ -180,7 +227,17 @@ export class PromptHandler {
       responseMetadata?.['reason'] === 'max_tokens' ||
       responseMetadata?.['tokenLimitReached']
     ) {
-      return STOP_REASON.MAX_TOKENS;
+      return {
+        stopReason: STOP_REASON.MAX_TOKENS,
+        stopReasonDetails: {
+          tokensUsed: responseMetadata?.['tokensUsed'],
+          tokenLimit: responseMetadata?.['tokenLimit'],
+          contentTruncated: true,
+          ...(responseMetadata?.['partialCompletion'] && {
+            partialCompletion: responseMetadata['partialCompletion'],
+          }),
+        },
+      };
     }
 
     // Check for turn limit reached from Cursor response
@@ -188,16 +245,46 @@ export class PromptHandler {
       responseMetadata?.['reason'] === 'max_turn_requests' ||
       responseMetadata?.['turnLimitReached']
     ) {
-      return STOP_REASON.MAX_TURN_REQUESTS;
+      return {
+        stopReason: STOP_REASON.MAX_TURN_REQUESTS,
+        stopReasonDetails: {
+          turnsUsed: responseMetadata?.['turnsUsed'],
+          turnLimit: responseMetadata?.['turnLimit'],
+          toolCallsMade: responseMetadata?.['toolCallsMade'],
+        },
+      };
     }
 
     // Explicit refusal or error occurred
     if (error || responseMetadata?.['refused'] || responseMetadata?.['error']) {
-      return STOP_REASON.REFUSAL;
+      return {
+        stopReason: STOP_REASON.REFUSAL,
+        stopReasonDetails: {
+          reason: 'refusal', // Standard reason field matching stopReason
+          refusalType: error ? 'error' : 'refused',
+          ...(error && {
+            errorName: error.name,
+            errorMessage: error.message,
+            errorStack: error.stack?.split('\n').slice(0, 3).join('\n'), // First 3 lines
+          }),
+          ...(responseMetadata?.['refusalReason'] && {
+            refusalReason: responseMetadata['refusalReason'],
+          }),
+          ...(responseMetadata?.['safeguardTriggered'] && {
+            safeguard: responseMetadata['safeguardTriggered'],
+          }),
+        },
+      };
     }
 
     // Normal completion
-    return STOP_REASON.END_TURN;
+    return {
+      stopReason: STOP_REASON.END_TURN,
+      stopReasonDetails: {
+        completionType: 'normal',
+        contentBlocks: responseMetadata?.['messageBlocks'],
+      },
+    };
   }
 
   /**
@@ -245,6 +332,66 @@ export class PromptHandler {
       totalSize += this.getContentSize(block);
     }
     return totalSize;
+  }
+
+  /**
+   * Collect comprehensive metrics for prompt processing
+   * Per ACP best practices: Track detailed metrics for observability
+   * Note: Public infrastructure method ready for external integration
+   */
+  public collectMetrics(
+    startTime: number,
+    endTime: number,
+    inputContent: ContentBlock[],
+    outputContent: ContentBlock[],
+    heartbeatCount: number,
+    toolCalls?: ToolCallInfo[]
+  ): PromptMetrics {
+    const contentTypes: Record<string, number> = {};
+
+    // Count content types in output
+    for (const block of outputContent) {
+      contentTypes[block.type] = (contentTypes[block.type] || 0) + 1;
+    }
+
+    // Get session message count if available
+    // Note: We'll get this from the session state in the calling context
+    // This is a placeholder for now - should be passed as a parameter
+    const sessionMessageCount = 0;
+
+    const metrics: PromptMetrics = {
+      startTime,
+      endTime,
+      totalDurationMs: endTime - startTime,
+      inputBlocks: inputContent.length,
+      inputSize: this.calculateContentSize(inputContent),
+      outputBlocks: outputContent.length,
+      outputSize: this.calculateContentSize(outputContent),
+      contentTypes,
+      toolCallsInitiated: toolCalls?.length || 0,
+      toolCallsCompleted:
+        toolCalls?.filter((t) => t.status === 'completed').length || 0,
+      toolCallsFailed:
+        toolCalls?.filter((t) => t.status === 'failed').length || 0,
+      toolCallDurations: {},
+      heartbeatsSent: heartbeatCount,
+      sessionMessageCount,
+    };
+
+    // Add tool call durations if available
+    if (toolCalls) {
+      for (const toolCall of toolCalls) {
+        if (
+          toolCall.status === 'completed' &&
+          toolCall.rawOutput?.['durationMs']
+        ) {
+          metrics.toolCallDurations[toolCall.title] =
+            toolCall.rawOutput['durationMs'];
+        }
+      }
+    }
+
+    return metrics;
   }
 
   /**
@@ -337,48 +484,142 @@ export class PromptHandler {
     return options;
   }
 
-  // Note: Tool call lifecycle methods, plan notifications, and detailed metrics
-  // collection are infrastructure ready for future implementation. See
-  // PromptProcessingConfig for configuration options and
-  // PROMPT_TURN_PHASE3_IMPLEMENTED.md for usage examples.
-  //
-  // Tool call lifecycle example (currently not used):
-  //
-  // private reportToolCall(sessionId: string, toolCall: ToolCallInfo): void {
-  //   this.sendNotification({
-  //     jsonrpc: '2.0',
-  //     method: 'session/update',
-  //     params: {
-  //       sessionId,
-  //       update: {
-  //         sessionUpdate: 'tool_call',
-  //         toolCallId: toolCall.id,
-  //         kind: toolCall.kind,
-  //         title: toolCall.title,
-  //         status: toolCall.status,
-  //         ...(toolCall.rawInput && { rawInput: toolCall.rawInput }),
-  //         ...(toolCall.content && { content: toolCall.content }),
-  //       },
-  //     },
-  //   });
-  // }
-  //
-  // private updateToolCall(sessionId: string, toolCallId: string, update: {...}): void {
-  //   this.sendNotification({
-  //     jsonrpc: '2.0',
-  //     method: 'session/update',
-  //     params: {
-  //       sessionId,
-  //       update: {
-  //         sessionUpdate: 'tool_call_update',
-  //         toolCallId,
-  //         ...(update.status && { status: update.status }),
-  //         ...(update.rawOutput && { rawOutput: update.rawOutput }),
-  //         ...(update.content && { content: update.content }),
-  //       },
-  //     },
-  //   });
-  // }
+  /**
+   * Report tool call initiation
+   * Per ACP spec: Inform client when agent begins using a tool
+   * Note: Public infrastructure method ready for integration with ToolCallManager
+   */
+  public reportToolCall(sessionId: string, toolCall: ToolCallInfo): void {
+    if (!this.processingConfig.reportToolCalls) {
+      return;
+    }
+
+    this.logger.debug('Reporting tool call', {
+      sessionId,
+      toolCallId: toolCall.id,
+      kind: toolCall.kind,
+    });
+
+    this.sendNotification({
+      jsonrpc: '2.0',
+      method: 'session/update',
+      params: {
+        sessionId,
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: toolCall.id,
+          kind: toolCall.kind,
+          title: toolCall.title,
+          status: toolCall.status,
+          ...(toolCall.rawInput && { rawInput: toolCall.rawInput }),
+          ...(toolCall.content && { content: toolCall.content }),
+        },
+      },
+    });
+  }
+
+  /**
+   * Update tool call status and results
+   * Per ACP spec: Inform client when tool completes or fails
+   * Note: Public infrastructure method ready for integration with ToolCallManager
+   */
+  public updateToolCall(
+    sessionId: string,
+    toolCallId: string,
+    update: Partial<ToolCallInfo>
+  ): void {
+    if (!this.processingConfig.reportToolCalls) {
+      return;
+    }
+
+    this.logger.debug('Updating tool call', {
+      sessionId,
+      toolCallId,
+      status: update.status,
+    });
+
+    this.sendNotification({
+      jsonrpc: '2.0',
+      method: 'session/update',
+      params: {
+        sessionId,
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId,
+          ...(update.status && { status: update.status }),
+          ...(update.rawOutput && { rawOutput: update.rawOutput }),
+          ...(update.content && { content: update.content }),
+        },
+      },
+    });
+  }
+
+  /**
+   * Send plan to client
+   * Per ACP spec: Inform client of multi-step operation plan
+   * Note: Public infrastructure method ready for integration when multi-step planning is implemented
+   */
+  public sendPlan(sessionId: string, plan: PlanEntry[]): void {
+    if (!this.processingConfig.sendPlan || plan.length === 0) {
+      return;
+    }
+
+    this.logger.debug('Sending plan', {
+      sessionId,
+      stepCount: plan.length,
+    });
+
+    this.sendNotification({
+      jsonrpc: '2.0',
+      method: 'session/update',
+      params: {
+        sessionId,
+        update: {
+          sessionUpdate: 'plan',
+          plan: plan.map((entry) => ({
+            id: entry.id,
+            title: entry.title,
+            status: entry.status,
+            ...(entry.description && { description: entry.description }),
+          })),
+        },
+      },
+    });
+  }
+
+  /**
+   * Update plan entry status
+   * Per ACP spec: Inform client of plan progress
+   * Note: Public infrastructure method ready for integration when multi-step planning is implemented
+   */
+  public updatePlanEntry(
+    sessionId: string,
+    entryId: string,
+    status: PlanEntry['status']
+  ): void {
+    if (!this.processingConfig.sendPlan) {
+      return;
+    }
+
+    this.logger.debug('Updating plan entry', {
+      sessionId,
+      entryId,
+      status,
+    });
+
+    this.sendNotification({
+      jsonrpc: '2.0',
+      method: 'session/update',
+      params: {
+        sessionId,
+        update: {
+          sessionUpdate: 'plan_update',
+          planEntryId: entryId,
+          status,
+        },
+      },
+    });
+  }
 
   /**
    * Process a session/prompt request
@@ -464,7 +705,7 @@ export class PromptHandler {
             return;
           }
 
-          // Send progress update via agent_thought_chunk
+          // Send progress update via agent_thought_chunk with enhanced metadata
           this.sendNotification({
             jsonrpc: '2.0',
             method: 'session/update',
@@ -475,6 +716,13 @@ export class PromptHandler {
                 content: {
                   type: 'text',
                   text: `${processingText} (${elapsed}s)`,
+                  annotations: {
+                    _meta: {
+                      heartbeat: true,
+                      elapsedSeconds: elapsed,
+                      heartbeatNumber: heartbeatCount,
+                    },
+                  },
                 },
               },
             },
@@ -506,8 +754,8 @@ export class PromptHandler {
             // Don't rethrow - we'll determine the appropriate stop reason
           }
 
-          // Determine the appropriate stop reason based on execution context
-          const stopReason = this.determineStopReason(
+          // Determine the appropriate stop reason based on execution context with detailed metadata
+          const stopData = this.determineStopReason(
             processingError,
             aborted,
             responseMetadata
@@ -519,7 +767,7 @@ export class PromptHandler {
 
           // Build proper PromptResponse with rich metadata
           const response: PromptResponse = {
-            stopReason,
+            stopReason: stopData.stopReason,
             _meta: {
               // Timing information
               processingStartedAt: new Date(startTime).toISOString(),
@@ -541,16 +789,9 @@ export class PromptHandler {
                 contentMetrics: responseMetadata['contentMetrics'],
               }),
 
-              // Stop reason details (if not normal completion)
-              ...(stopReason !== STOP_REASON.END_TURN && {
-                stopReasonDetails: {
-                  reason: stopReason,
-                  ...(processingError && {
-                    errorMessage: processingError.message,
-                    errorName: processingError.name,
-                  }),
-                  ...responseMetadata,
-                },
+              // Stop reason details from enhanced determination
+              ...(stopData.stopReasonDetails && {
+                stopReasonDetails: stopData.stopReasonDetails,
               }),
             },
           };
@@ -559,8 +800,9 @@ export class PromptHandler {
           if (processingError) {
             this.logger.warn('Prompt processing completed with error', {
               sessionId,
-              stopReason,
+              stopReason: stopData.stopReason,
               error: processingError.message,
+              details: stopData.stopReasonDetails,
             });
           }
 

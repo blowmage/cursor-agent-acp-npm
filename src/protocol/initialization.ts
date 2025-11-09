@@ -62,7 +62,28 @@ function getPackageVersion(): string {
   }
 }
 
+/**
+ * Performance metrics for initialization
+ */
+interface InitializationMetrics {
+  versionNegotiationTime: number;
+  clientInfoValidationTime: number;
+  capabilityValidationTime: number;
+  connectivityTestTime: number;
+  capabilityBuildTime: number;
+  totalTime: number;
+}
+
 export class InitializationHandler {
+  // Protocol version constants
+  private static readonly SUPPORTED_VERSIONS: readonly number[] = [1];
+  private static readonly LATEST_VERSION = Math.max(
+    ...InitializationHandler.SUPPORTED_VERSIONS
+  );
+  private static readonly MIN_VERSION = Math.min(
+    ...InitializationHandler.SUPPORTED_VERSIONS
+  );
+
   private config: AdapterConfig;
   private logger: Logger;
   private initConfig: InitializationConfig;
@@ -77,6 +98,21 @@ export class InitializationHandler {
     this.config = config;
     this.logger = logger;
     this.initConfig = initConfig;
+  }
+
+  /**
+   * Get supported protocol versions
+   * Useful for documentation and testing
+   */
+  static getSupportedVersions(): readonly number[] {
+    return InitializationHandler.SUPPORTED_VERSIONS;
+  }
+
+  /**
+   * Check if a protocol version is supported
+   */
+  static isVersionSupported(version: number): boolean {
+    return InitializationHandler.SUPPORTED_VERSIONS.includes(version);
   }
 
   /**
@@ -120,11 +156,65 @@ export class InitializationHandler {
   }
 
   /**
+   * Check if client supports both file system read and write
+   */
+  canRequestFileSystem(): boolean {
+    return this.canRequestFileRead() && this.canRequestFileWrite();
+  }
+
+  /**
+   * Get a summary of all client capabilities for logging/debugging
+   */
+  getClientCapabilitiesSummary(): {
+    fileSystem: { read: boolean; write: boolean };
+    terminal: boolean;
+    customCapabilities: boolean;
+  } {
+    return {
+      fileSystem: {
+        read: this.canRequestFileRead(),
+        write: this.canRequestFileWrite(),
+      },
+      terminal: this.canRequestTerminal(),
+      customCapabilities: !!this.clientCapabilities?._meta,
+    };
+  }
+
+  /**
+   * Verify client can perform a specific operation before calling it
+   * Throws descriptive error if not supported
+   */
+  requireClientCapability(
+    operation: 'fileRead' | 'fileWrite' | 'terminal'
+  ): void {
+    const canDo = {
+      fileRead: this.canRequestFileRead(),
+      fileWrite: this.canRequestFileWrite(),
+      terminal: this.canRequestTerminal(),
+    };
+
+    if (!canDo[operation]) {
+      throw new ProtocolError(
+        `Client does not support ${operation} operations. ` +
+          `Please check clientCapabilities during initialization.`
+      );
+    }
+  }
+
+  /**
    * Handles the ACP initialize method
    * Per ACP spec: https://agentclientprotocol.com/protocol/initialization
    */
   async initialize(params: InitializeRequest): Promise<InitializeResponse> {
     const startTime = Date.now();
+    const metrics: InitializationMetrics = {
+      versionNegotiationTime: 0,
+      clientInfoValidationTime: 0,
+      capabilityValidationTime: 0,
+      connectivityTestTime: 0,
+      capabilityBuildTime: 0,
+      totalTime: 0,
+    };
 
     this.logger.info('Initializing ACP adapter', {
       protocolVersion: params.protocolVersion,
@@ -134,24 +224,32 @@ export class InitializationHandler {
 
     try {
       // Validate and negotiate protocol version
+      const versionStart = Date.now();
       const agreedVersion = this.negotiateProtocolVersion(
         params.protocolVersion
       );
+      metrics.versionNegotiationTime = Date.now() - versionStart;
 
       // Validate and store client information
       // Per ACP spec: clientInfo will be required in future protocol versions
+      const clientInfoStart = Date.now();
       this.validateAndStoreClientInfo(params.clientInfo);
+      metrics.clientInfoValidationTime = Date.now() - clientInfoStart;
 
       // Validate and store client capabilities
       // Per ACP spec: Used to determine which client methods the agent can call
+      const capabilityStart = Date.now();
       this.validateAndStoreClientCapabilities(params.clientCapabilities);
+      metrics.capabilityValidationTime = Date.now() - capabilityStart;
 
       // Test cursor-agent connectivity (configurable)
       // Per ACP spec: initialization should succeed to communicate capabilities
       // Errors should occur when features are actually used, not during init
       let connectivityTest: ConnectivityTestResult | undefined;
       if (this.initConfig.testConnectivity !== false) {
+        const connectivityStart = Date.now();
         connectivityTest = await this.testCursorConnectivity();
+        metrics.connectivityTestTime = Date.now() - connectivityStart;
 
         if (!connectivityTest.success) {
           this.logger.warn(
@@ -179,20 +277,40 @@ export class InitializationHandler {
       }
 
       // Build agent capabilities based on configuration and connectivity
+      const buildStart = Date.now();
       const agentCapabilities = this.buildAgentCapabilities(connectivityTest);
+      metrics.capabilityBuildTime = Date.now() - buildStart;
 
       // Build authentication methods (currently none required)
       const authMethods = this.buildAuthMethods();
+
+      // Calculate total time and check for performance issues
+      metrics.totalTime = Date.now() - startTime;
+
+      // Log performance metrics
+      this.logger.debug('Initialization performance metrics', metrics);
+
+      // Check for performance warnings
+      const performanceWarnings: string[] = [];
+      if (metrics.connectivityTestTime > 1000) {
+        performanceWarnings.push('connectivity test exceeded 1s');
+      }
+      if (metrics.totalTime > 2000) {
+        performanceWarnings.push('total initialization exceeded 2s');
+      }
+
+      if (performanceWarnings.length > 0) {
+        this.logger.warn('Initialization performance warnings', {
+          warnings: performanceWarnings,
+          metrics,
+        });
+      }
 
       // Per ACP spec: Build initialization result
       const result: InitializeResponse = {
         protocolVersion: agreedVersion,
         agentCapabilities,
-        agentInfo: {
-          name: 'cursor-agent-acp',
-          title: 'Cursor Agent ACP Adapter',
-          version: getPackageVersion(), // Dynamic version from package.json
-        },
+        agentInfo: this.buildAgentInfo(),
         authMethods,
 
         // Extension point for debugging and monitoring
@@ -210,7 +328,7 @@ export class InitializationHandler {
         _meta: {
           // Initialization metadata
           initializationTime: new Date().toISOString(),
-          initializationDurationMs: Date.now() - startTime,
+          initializationDurationMs: metrics.totalTime,
 
           // Cursor CLI status (helps client understand capabilities)
           cursorCliStatus: connectivityTest?.success
@@ -234,11 +352,17 @@ export class InitializationHandler {
           versionNegotiation: {
             clientRequested: params.protocolVersion,
             agentResponded: agreedVersion,
-            agentSupports: [1], // SUPPORTED_VERSIONS constant
+            agentSupports: [...InitializationHandler.SUPPORTED_VERSIONS],
           },
 
           // Implementation details
           implementation: 'cursor-agent-acp-npm',
+
+          // Add detailed timing if there are performance issues
+          ...(performanceWarnings.length > 0 && {
+            performanceTiming: metrics,
+            performanceWarnings,
+          }),
         },
       };
 
@@ -246,22 +370,78 @@ export class InitializationHandler {
         protocolVersion: result.protocolVersion,
         agentCapabilities: result.agentCapabilities,
         agentInfo: result.agentInfo,
-        durationMs: Date.now() - startTime,
+        durationMs: metrics.totalTime,
       });
 
       return result;
     } catch (error) {
+      metrics.totalTime = Date.now() - startTime;
+
       this.logger.error('Initialization failed', {
         error,
-        durationMs: Date.now() - startTime,
+        durationMs: metrics.totalTime,
+        clientVersion: params.protocolVersion,
+        hasClientInfo: !!params.clientInfo,
+        hasClientCapabilities: !!params.clientCapabilities,
+        errorType:
+          error instanceof Error ? error.constructor.name : typeof error,
       });
-      throw error instanceof ProtocolError
-        ? error
-        : new ProtocolError(
-            `Initialization failed: ${error instanceof Error ? error.message : String(error)}`,
-            error instanceof Error ? error : undefined
-          );
+
+      // If already a ProtocolError, re-throw as-is
+      if (error instanceof ProtocolError) {
+        throw error;
+      }
+
+      // Wrap other errors with context
+      const contextualError = new ProtocolError(
+        `Initialization failed after ${metrics.totalTime}ms: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        error instanceof Error ? error : undefined
+      );
+
+      // Add context to error for better debugging
+      if (error instanceof Error && error.stack) {
+        contextualError.stack = error.stack;
+      }
+
+      throw contextualError;
     }
+  }
+
+  /**
+   * Builds agent information with validation
+   * Per ACP spec: agentInfo should include name, version, and optionally title
+   */
+  private buildAgentInfo(): Implementation {
+    const version = getPackageVersion();
+    const name = 'cursor-agent-acp';
+    const title = 'Cursor Agent ACP Adapter';
+
+    // Validate field lengths per best practices
+    if (name.length > 100) {
+      this.logger.warn(
+        'Agent name exceeds recommended length of 100 characters',
+        {
+          length: name.length,
+        }
+      );
+    }
+
+    if (version.length > 50) {
+      this.logger.warn(
+        'Agent version exceeds recommended length of 50 characters',
+        {
+          length: version.length,
+        }
+      );
+    }
+
+    return {
+      name,
+      title,
+      version,
+    };
   }
 
   /**
@@ -280,15 +460,56 @@ export class InitializationHandler {
       return;
     }
 
-    // Validate clientInfo structure
-    if (!clientInfo.name || !clientInfo.version) {
-      this.logger.warn('Client provided incomplete clientInfo', {
-        hasName: !!clientInfo.name,
-        hasVersion: !!clientInfo.version,
-        hasTitle: !!clientInfo.title,
+    // Validate required fields
+    const issues: string[] = [];
+
+    if (!clientInfo.name || typeof clientInfo.name !== 'string') {
+      issues.push('name is required and must be a string');
+    } else if (clientInfo.name.length === 0) {
+      issues.push('name must not be empty');
+    } else if (clientInfo.name.length > 100) {
+      this.logger.warn(
+        'Client name exceeds recommended length of 100 characters',
+        {
+          length: clientInfo.name.length,
+        }
+      );
+    }
+
+    if (!clientInfo.version || typeof clientInfo.version !== 'string') {
+      issues.push('version is required and must be a string');
+    } else if (clientInfo.version.length === 0) {
+      issues.push('version must not be empty');
+    } else if (clientInfo.version.length > 50) {
+      this.logger.warn(
+        'Client version exceeds recommended length of 50 characters',
+        {
+          length: clientInfo.version.length,
+        }
+      );
+    }
+
+    // Title is optional but should be validated if provided
+    if (clientInfo.title !== undefined) {
+      if (typeof clientInfo.title !== 'string') {
+        issues.push('title must be a string if provided');
+      } else if (clientInfo.title.length > 200) {
+        this.logger.warn(
+          'Client title exceeds recommended length of 200 characters',
+          {
+            length: clientInfo.title.length,
+          }
+        );
+      }
+    }
+
+    if (issues.length > 0) {
+      this.logger.warn('Client provided invalid clientInfo', {
+        issues,
+        clientInfo,
       });
     } else {
-      this.logger.info('Client information received', {
+      this.logger.info('Client information received and validated', {
         name: clientInfo.name,
         title: clientInfo.title,
         version: clientInfo.version,
@@ -378,13 +599,13 @@ export class InitializationHandler {
     clientVersion: number | null | undefined
   ): number {
     // Per ACP spec: protocol versions are integers (1, 2, 3, etc.)
-    const SUPPORTED_VERSIONS = [1]; // This agent supports protocol version 1
-    const LATEST_VERSION = Math.max(...SUPPORTED_VERSIONS);
-    const MIN_VERSION = Math.min(...SUPPORTED_VERSIONS);
+    const SUPPORTED_VERSIONS = InitializationHandler.SUPPORTED_VERSIONS;
+    const LATEST_VERSION = InitializationHandler.LATEST_VERSION;
+    const MIN_VERSION = InitializationHandler.MIN_VERSION;
 
     this.logger.info('Protocol version negotiation', {
       clientRequested: clientVersion,
-      agentSupports: SUPPORTED_VERSIONS,
+      agentSupports: [...SUPPORTED_VERSIONS],
       agentLatest: LATEST_VERSION,
     });
 
@@ -392,7 +613,7 @@ export class InitializationHandler {
     if (clientVersion === null || clientVersion === undefined) {
       throw new ProtocolError(
         'Protocol version is required in initialize request. ' +
-          `This agent supports versions: ${SUPPORTED_VERSIONS.join(', ')}. ` +
+          `This agent supports versions: ${[...SUPPORTED_VERSIONS].join(', ')}. ` +
           'Please specify "protocolVersion" in your request.'
       );
     }
@@ -402,7 +623,7 @@ export class InitializationHandler {
       throw new ProtocolError(
         `Protocol version must be an integer. ` +
           `Received: ${clientVersion} (${typeof clientVersion}). ` +
-          `Supported versions: ${SUPPORTED_VERSIONS.join(', ')}`
+          `Supported versions: ${[...SUPPORTED_VERSIONS].join(', ')}`
       );
     }
 
@@ -410,7 +631,7 @@ export class InitializationHandler {
     if (clientVersion < 1) {
       throw new ProtocolError(
         `Protocol version must be positive. Received: ${clientVersion}. ` +
-          `Supported versions: ${SUPPORTED_VERSIONS.join(', ')}`
+          `Supported versions: ${[...SUPPORTED_VERSIONS].join(', ')}`
       );
     }
 

@@ -9,6 +9,11 @@ module.exports = {
     '^@tests/(.*)$': '<rootDir>/tests/$1',
   },
 
+  // Transform ES modules from node_modules that Jest can't handle
+  transformIgnorePatterns: [
+    'node_modules/(?!(@agentclientprotocol|zod)/)',
+  ],
+
   setupFiles: ['<rootDir>/tests/integration/env.ts'],
   setupFilesAfterEnv: ['<rootDir>/tests/integration/setup.ts'],
   globalTeardown: '<rootDir>/tests/integration/teardown.ts',

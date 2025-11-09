@@ -2,10 +2,17 @@
 
 import { jest } from '@jest/globals';
 
+// Mock the @agentclientprotocol/sdk ES module before any imports
+jest.mock('@agentclientprotocol/sdk', () => ({
+  AgentSideConnection: jest.fn(),
+  ndJsonStream: jest.fn(),
+  // Add other exports as needed
+}));
+
 // Increase max listeners to prevent warnings during parallel test execution
 // Jest adds listeners for each test suite for exit handling
-// Set to 30 to accommodate 6 test suites running in parallel
-process.setMaxListeners(30);
+// Set to 36 to accommodate 6 test suites running in parallel
+process.setMaxListeners(36);
 
 // Extend Jest timeout for all tests
 jest.setTimeout(10000);

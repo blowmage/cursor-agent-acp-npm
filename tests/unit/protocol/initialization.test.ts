@@ -1001,7 +1001,7 @@ describe('InitializationHandler', () => {
       // Assert
       expect(result).toBeDefined();
       expect(logSpy).toHaveBeenCalledWith(
-        'Client information received',
+        'Client information received and validated',
         expect.objectContaining({
           name: 'test-client',
           title: 'Test Client Application',

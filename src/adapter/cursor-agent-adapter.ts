@@ -9,23 +9,33 @@
  */
 
 import { createServer, Server } from 'http';
-import type {
-  Request,
-  Request1,
-  InitializeRequest as InitializeParams,
-  NewSessionRequest,
-  NewSessionResponse,
-  LoadSessionRequest,
-  LoadSessionResponse,
-  SetSessionModeRequest,
-  SetSessionModeResponse,
-  SetSessionModelRequest,
-  SetSessionModelResponse,
-  SessionModeState,
-  SessionModelState,
-  CancelNotification,
+import {
+  AgentSideConnection,
+  ndJsonStream,
+  type Request,
+  type Request1,
+  type InitializeRequest,
+  type InitializeResponse,
+  type NewSessionRequest,
+  type NewSessionResponse,
+  type LoadSessionRequest,
+  type LoadSessionResponse,
+  type SetSessionModeRequest,
+  type SetSessionModeResponse,
+  type SetSessionModelRequest,
+  type SetSessionModelResponse,
+  type SessionModeState,
+  type SessionModelState,
+  type CancelNotification,
+  type PromptRequest,
+  type PromptResponse,
+  type ReadTextFileRequest,
+  type ReadTextFileResponse,
+  type WriteTextFileRequest,
+  type WriteTextFileResponse,
 } from '@agentclientprotocol/sdk';
 import type { Error as JsonRpcError } from '@agentclientprotocol/sdk';
+import { CursorAgentImplementation } from './agent-implementation';
 import {
   AdapterError,
   ProtocolError,
@@ -47,8 +57,11 @@ import { ToolCallManager } from '../tools/tool-call-manager';
 import { InitializationHandler } from '../protocol/initialization';
 import { PromptHandler } from '../protocol/prompt';
 import { PermissionsHandler } from '../protocol/permissions';
+import type { ClientConnection } from '../client/client-connection';
+import { AcpFileSystemClient } from '../client/filesystem-client';
+import { FilesystemToolProvider } from '../tools/filesystem';
 
-export class CursorAgentAdapter {
+export class CursorAgentAdapter implements ClientConnection {
   private config: AdapterConfig;
   private logger: Logger;
   private isRunning = false;
@@ -62,6 +75,12 @@ export class CursorAgentAdapter {
   private permissionsHandler?: PermissionsHandler;
   private initializationHandler?: InitializationHandler;
   private promptHandler?: PromptHandler;
+
+  // ACP-compliant file system client
+  private fileSystemClient?: AcpFileSystemClient;
+
+  // SDK connection for bi-directional communication
+  private agentConnection?: AgentSideConnection;
 
   // Transport servers
   private httpServer?: Server;
@@ -120,6 +139,9 @@ export class CursorAgentAdapter {
 
   /**
    * Start the adapter with stdio transport (for ACP clients)
+   *
+   * Per ACP spec: Uses SDK's AgentSideConnection for bi-directional
+   * communication, enabling file system tools to call client methods.
    */
   async startStdio(): Promise<void> {
     if (this.isRunning) {
@@ -127,16 +149,85 @@ export class CursorAgentAdapter {
     }
 
     try {
-      this.logger.info('Starting ACP adapter with stdio transport');
+      this.logger.info('Starting ACP adapter with stdio transport via SDK');
       this.startTime = new Date();
       this.isRunning = true;
 
-      // Setup stdio handlers
-      this.setupStdioTransport();
+      // Create SDK stream for stdio communication
+      // Convert Node.js streams to Web streams for SDK
+      const output = new WritableStream<Uint8Array>({
+        write(chunk) {
+          process.stdout.write(chunk);
+        },
+      });
 
-      this.logger.info('Adapter started successfully with stdio transport');
+      // Buffer for pre-existing stdin data
+      const stdinBuffer: Buffer[] = [];
+      let started = false;
+      // Temporary listener to buffer data before stream starts
+      const preDataListener = (chunk: Buffer) => {
+        stdinBuffer.push(chunk);
+      };
+      process.stdin.on('data', preDataListener);
+
+      const input = new ReadableStream<Uint8Array>({
+        start(controller) {
+          started = true;
+          // Remove temporary listener
+          process.stdin.removeListener('data', preDataListener);
+          // Drain buffered data
+          for (const chunk of stdinBuffer) {
+            controller.enqueue(new Uint8Array(chunk));
+          }
+          stdinBuffer.length = 0;
+          // Define handlers so we can remove them later
+          const dataHandler = (chunk: Buffer) => {
+            controller.enqueue(new Uint8Array(chunk));
+          };
+          const endHandler = () => {
+            controller.close();
+          };
+          const errorHandler = (err: Error) => {
+            controller.error(err);
+          };
+          // Store handlers for cleanup
+          (controller as any)._dataHandler = dataHandler;
+          (controller as any)._endHandler = endHandler;
+          (controller as any)._errorHandler = errorHandler;
+          process.stdin.on('data', dataHandler);
+          process.stdin.on('end', endHandler);
+          process.stdin.on('error', errorHandler);
+        },
+        cancel() {
+          // Remove listeners to prevent memory leaks
+          if (started) {
+            process.stdin.removeListener('data', (this as any)._dataHandler);
+            process.stdin.removeListener('end', (this as any)._endHandler);
+            process.stdin.removeListener('error', (this as any)._errorHandler);
+          }
+        },
+      });
+
+      const stream = ndJsonStream(output, input);
+
+      this.logger.debug('Creating AgentSideConnection');
+
+      // Create AgentSideConnection with our Agent implementation
+      this.agentConnection = new AgentSideConnection((conn) => {
+        this.logger.debug('Agent factory called - connection established');
+        return new CursorAgentImplementation(this, conn, this.logger);
+      }, stream);
+
+      this.logger.info('Adapter started successfully with SDK stdio transport');
+
+      // Wait for connection to close
+      await this.agentConnection.closed;
+
+      this.logger.info('Connection closed, shutting down adapter');
+      await this.shutdown();
     } catch (error) {
       this.isRunning = false;
+      this.logger.error('Failed to start SDK stdio transport', error);
       throw new AdapterError(
         `Failed to start stdio transport: ${error instanceof Error ? error.message : String(error)}`,
         'STARTUP_ERROR',
@@ -383,6 +474,25 @@ export class CursorAgentAdapter {
       sendNotification: this.sendNotification.bind(this),
     });
 
+    // Initialize ACP-compliant file system client
+    // Per ACP spec: This adapter implements ClientConnection to enable
+    // filesystem tools to call client methods (fs/read_text_file, fs/write_text_file)
+    this.fileSystemClient = new AcpFileSystemClient(this, this.logger);
+
+    // Register filesystem tool provider if enabled
+    // Per ACP spec: Only offer filesystem tools if client supports them
+    // (checked during tool registration based on clientCapabilities)
+    if (this.config.tools.filesystem.enabled) {
+      const filesystemProvider = new FilesystemToolProvider(
+        this.config,
+        this.logger,
+        null, // Client capabilities set after initialization
+        this.fileSystemClient
+      );
+      // Note: Provider will check capabilities and only offer tools if supported
+      this.toolRegistry.registerProvider(filesystemProvider);
+    }
+
     this.logger.debug('All components initialized');
   }
 
@@ -452,74 +562,6 @@ export class CursorAgentAdapter {
       fullNotification: notificationStr,
     });
     process.stdout.write(`${notificationStr}\n`);
-  }
-
-  private setupStdioTransport(): void {
-    let buffer = '';
-
-    this.logger.debug('Setting up stdio transport', {
-      stdinIsTTY: process.stdin.isTTY,
-      stdoutIsTTY: process.stdout.isTTY,
-      stderrIsTTY: process.stderr.isTTY,
-      stdinReadable: process.stdin.readable,
-      stdoutWritable: process.stdout.writable,
-    });
-
-    process.stdin.on('data', (data) => {
-      buffer += data.toString();
-
-      this.logger.debug('Received data on stdin', {
-        dataLength: data.length,
-        bufferLength: buffer.length,
-      });
-
-      // Process complete JSON-RPC messages
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || ''; // Keep incomplete line in buffer
-
-      for (const line of lines) {
-        if (line.trim()) {
-          this.processStdioMessage(line.trim());
-        }
-      }
-    });
-
-    process.stdin.on('end', () => {
-      this.logger.info('Stdin closed, shutting down adapter');
-      this.shutdown().catch((error) => {
-        this.logger.error('Error during stdin shutdown', error);
-        process.exit(1);
-      });
-    });
-  }
-
-  private async processStdioMessage(message: string): Promise<void> {
-    const request: Request | Request1 = JSON.parse(message);
-
-    // Per JSON-RPC 2.0 spec: Notifications (requests without id) do not receive responses
-    if (this.isNotification(request)) {
-      this.logger.debug('Processing notification (no response)', {
-        method: request.method,
-      });
-      await this.processRequest(request);
-      return;
-    }
-
-    const response = await this.processRequest(request);
-
-    // Validate response before sending
-    const responseStr = JSON.stringify(response);
-    this.logger.debug('Sending response to Zed', {
-      method: request.method,
-      id: request.id,
-      responseLength: responseStr.length,
-      hasResult: !!response.result,
-      hasError: !!response.error,
-      fullResponse: responseStr,
-    });
-
-    // Send response to stdout
-    process.stdout.write(`${responseStr}\n`);
   }
 
   private async handleHttpRequest(req: any, res: any): Promise<void> {
@@ -599,7 +641,7 @@ export class CursorAgentAdapter {
     }
 
     const params =
-      (request.params as InitializeParams) || ({} as InitializeParams);
+      (request.params as InitializeRequest) || ({} as InitializeRequest);
 
     // Pass the entire params object to InitializationHandler
     // It will validate protocolVersion and handle all fields properly
@@ -661,6 +703,9 @@ export class CursorAgentAdapter {
       mcpServers: mcpServers, // Store MCP server configurations
     };
 
+    // Validate metadata before creating session
+    this.validateSessionMetadata(metadata);
+
     const sessionData = await this.sessionManager.createSession(metadata);
 
     this.logger.info('Session created with working directory and MCP servers', {
@@ -674,31 +719,24 @@ export class CursorAgentAdapter {
     // For now, we accept the configuration but don't connect
     if (mcpServers.length > 0) {
       this.logger.warn(
-        'MCP server connections are not yet implemented. Server configurations stored but not connected.',
-        { mcpServerCount: mcpServers.length }
+        'MCP server connections are not yet implemented. ' +
+          'Server configurations stored but not connected. ' +
+          'Servers will be available when MCP integration is completed.',
+        {
+          mcpServerCount: mcpServers.length,
+          serverTypes: mcpServers.map((s: any) => s.type || 'unknown'),
+          serverNames: mcpServers.map((s: any) => s.name || 'unnamed'),
+        }
       );
     }
 
-    // Build mode state per ACP spec
-    const modes: SessionModeState = {
-      availableModes: this.sessionManager.getAvailableModes().map((mode) => ({
-        id: mode.id,
-        name: mode.name,
-        description: mode.description,
-      })),
-      currentModeId: sessionData.state.currentMode || 'ask',
-    };
-
-    // Build model state per ACP spec (UNSTABLE)
-    const models: SessionModelState = {
-      availableModels: this.sessionManager
-        .getAvailableModels()
-        .map((model) => ({
-          modelId: model.id,
-          name: model.name,
-        })),
-      currentModelId: sessionData.state.currentModel || 'cursor-default',
-    };
+    // Build mode and model state using helper methods
+    const modes: SessionModeState | null = this.buildSessionModeState(
+      sessionData.id
+    );
+    const models: SessionModelState | null = this.buildSessionModelState(
+      sessionData.id
+    );
 
     // Per ACP spec: NewSessionResponse with typed response
     const response: NewSessionResponse = {
@@ -709,6 +747,14 @@ export class CursorAgentAdapter {
         createdAt: sessionData.createdAt.toISOString(),
         cwd,
         mcpServerCount: mcpServers.length,
+        ...(mcpServers.length > 0 && {
+          mcpStatus: 'not-implemented',
+          mcpServers: mcpServers.map((s: any) => ({
+            name: s.name || 'unnamed',
+            type: s.type || 'unknown',
+            status: 'pending-implementation',
+          })),
+        }),
       },
     };
 
@@ -768,6 +814,13 @@ export class CursorAgentAdapter {
     // Load the session data
     const sessionData = await this.sessionManager.loadSession(sessionId);
 
+    // Update session metadata with new cwd and mcpServers
+    await this.sessionManager.updateSession(sessionId, {
+      cwd,
+      mcpServers,
+      ...params.metadata,
+    });
+
     // Per ACP spec: Agent MUST replay entire conversation via session/update notifications
     // Stream each message in the conversation history
     for (const message of sessionData.conversation) {
@@ -806,26 +859,11 @@ export class CursorAgentAdapter {
       }
     }
 
-    // Build mode state per ACP spec
-    const modes: SessionModeState = {
-      availableModes: this.sessionManager.getAvailableModes().map((mode) => ({
-        id: mode.id,
-        name: mode.name,
-        description: mode.description,
-      })),
-      currentModeId: sessionData.state.currentMode || 'ask',
-    };
-
-    // Build model state per ACP spec (UNSTABLE)
-    const models: SessionModelState = {
-      availableModels: this.sessionManager
-        .getAvailableModels()
-        .map((model) => ({
-          modelId: model.id,
-          name: model.name,
-        })),
-      currentModelId: sessionData.state.currentModel || 'cursor-default',
-    };
+    // Build mode and model state using helper methods
+    const modes: SessionModeState | null =
+      this.buildSessionModeState(sessionId);
+    const models: SessionModelState | null =
+      this.buildSessionModelState(sessionId);
 
     // Per ACP spec: LoadSessionResponse with mode and model state
     const response: LoadSessionResponse = {
@@ -883,6 +921,7 @@ export class CursorAgentAdapter {
     const response: SetSessionModeResponse = {
       _meta: {
         previousMode,
+        newMode: params.modeId,
         changedAt: new Date().toISOString(),
       },
     };
@@ -929,6 +968,7 @@ export class CursorAgentAdapter {
     const response: SetSessionModelResponse = {
       _meta: {
         previousModel,
+        newModel: params.modelId,
         changedAt: new Date().toISOString(),
       },
     };
@@ -1187,8 +1227,11 @@ export class CursorAgentAdapter {
     }
 
     // Extract sessionId if provided (for tool call reporting)
+    // Check multiple parameter name variants for compatibility
     const sessionId =
-      params.parameters?.['sessionId'] || params.parameters?.['session_id'];
+      params.parameters?.['sessionId'] ||
+      params.parameters?.['session_id'] ||
+      params.parameters?.['_sessionId'];
 
     const toolCall = {
       id: (request.id ?? 'unknown').toString(),
@@ -1255,6 +1298,428 @@ export class CursorAgentAdapter {
     }
 
     return await this.permissionsHandler.handlePermissionRequest(request);
+  }
+
+  // ============================================================================
+  // ClientConnection Implementation - ACP File System Methods
+  // ============================================================================
+
+  /**
+   * ClientConnection implementation: Call fs/read_text_file on the client
+   * Per ACP spec: https://agentclientprotocol.com/protocol/file-system
+   *
+   * ✅ Fully functional using SDK's AgentSideConnection with validation!
+   */
+  async readTextFile(
+    params: ReadTextFileRequest
+  ): Promise<ReadTextFileResponse> {
+    this.logger.debug(
+      'Calling client method: fs/read_text_file via SDK',
+      params
+    );
+
+    if (!this.agentConnection) {
+      throw new ProtocolError(
+        'AgentSideConnection not established. Connection must be initialized before calling client methods.'
+      );
+    }
+
+    try {
+      // Validate params before sending to client
+      this.validateReadTextFileParams(params);
+
+      // Use SDK's AgentSideConnection to call client method
+      // This handles JSON-RPC request/response automatically!
+      const response = await this.agentConnection.readTextFile(params);
+
+      // Validate response structure per ACP spec
+      this.validateReadTextFileResponse(response);
+
+      this.logger.debug('fs/read_text_file succeeded', {
+        path: params.path,
+        contentLength: response.content.length,
+        hasLineRange: params.line !== undefined || params.limit !== undefined,
+      });
+
+      return response;
+    } catch (error) {
+      this.logger.error('fs/read_text_file failed', {
+        error,
+        path: params.path,
+        sessionId: params.sessionId,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * ClientConnection implementation: Call fs/write_text_file on the client
+   * Per ACP spec: https://agentclientprotocol.com/protocol/file-system
+   *
+   * ✅ Fully functional using SDK's AgentSideConnection with validation!
+   */
+  async writeTextFile(
+    params: WriteTextFileRequest
+  ): Promise<WriteTextFileResponse> {
+    this.logger.debug(
+      'Calling client method: fs/write_text_file via SDK',
+      params
+    );
+
+    if (!this.agentConnection) {
+      throw new ProtocolError(
+        'AgentSideConnection not established. Connection must be initialized before calling client methods.'
+      );
+    }
+
+    try {
+      // Validate params before sending to client
+      this.validateWriteTextFileParams(params);
+
+      // Use SDK's AgentSideConnection to call client method
+      // This handles JSON-RPC request/response automatically!
+      const response = await this.agentConnection.writeTextFile(params);
+
+      // Validate response structure per ACP spec
+      this.validateWriteTextFileResponse(response);
+
+      this.logger.debug('fs/write_text_file succeeded', {
+        path: params.path,
+        contentLength: params.content.length,
+      });
+
+      return response;
+    } catch (error) {
+      this.logger.error('fs/write_text_file failed', {
+        error,
+        path: params.path,
+        sessionId: params.sessionId,
+      });
+      throw error;
+    }
+  }
+
+  // ============================================================================
+  // Validation Methods for ACP File System Operations
+  // ============================================================================
+
+  /**
+   * Validate readTextFile request parameters per ACP spec
+   */
+  private validateReadTextFileParams(params: ReadTextFileRequest): void {
+    if (!params.sessionId || typeof params.sessionId !== 'string') {
+      throw new ProtocolError('sessionId is required and must be a string');
+    }
+
+    if (!params.path || typeof params.path !== 'string') {
+      throw new ProtocolError('path is required and must be a string');
+    }
+
+    if (params.line !== undefined) {
+      if (typeof params.line !== 'number' || params.line < 1) {
+        throw new ProtocolError('line must be a positive integer (1-based)');
+      }
+    }
+
+    if (params.limit !== undefined) {
+      if (typeof params.limit !== 'number' || params.limit < 1) {
+        throw new ProtocolError('limit must be a positive integer');
+      }
+    }
+  }
+
+  /**
+   * Validate readTextFile response per ACP spec
+   */
+  private validateReadTextFileResponse(response: ReadTextFileResponse): void {
+    if (!response || typeof response !== 'object') {
+      throw new ProtocolError('Invalid response: expected object');
+    }
+
+    if (typeof response.content !== 'string') {
+      throw new ProtocolError('Invalid response: content must be a string');
+    }
+  }
+
+  /**
+   * Validate writeTextFile request parameters per ACP spec
+   */
+  private validateWriteTextFileParams(params: WriteTextFileRequest): void {
+    if (!params.sessionId || typeof params.sessionId !== 'string') {
+      throw new ProtocolError('sessionId is required and must be a string');
+    }
+
+    if (!params.path || typeof params.path !== 'string') {
+      throw new ProtocolError('path is required and must be a string');
+    }
+
+    if (params.content === undefined || params.content === null) {
+      throw new ProtocolError('content is required');
+    }
+
+    if (typeof params.content !== 'string') {
+      throw new ProtocolError('content must be a string');
+    }
+  }
+
+  /**
+   * Validate writeTextFile response per ACP spec
+   */
+  private validateWriteTextFileResponse(response: WriteTextFileResponse): void {
+    if (!response || typeof response !== 'object') {
+      throw new ProtocolError('Invalid response: expected object');
+    }
+    // WriteTextFileResponse can be an empty object per ACP spec
+  }
+
+  // ============================================================================
+  // Private Helper Methods for Session Setup
+  // ============================================================================
+
+  /**
+   * Builds session mode state for responses
+   * Per ACP spec: Returns available modes and current mode
+   */
+  private buildSessionModeState(sessionId: string): SessionModeState | null {
+    if (!this.sessionManager) {
+      return null;
+    }
+
+    const availableModes = this.sessionManager.getAvailableModes();
+    const currentMode = this.sessionManager.getSessionMode(sessionId);
+
+    return {
+      availableModes: availableModes.map((mode) => ({
+        id: mode.id,
+        name: mode.name,
+        description: mode.description,
+      })),
+      currentModeId: currentMode,
+    };
+  }
+
+  /**
+   * Builds session model state for responses
+   * Per ACP spec (UNSTABLE): Returns available models and current model
+   */
+  private buildSessionModelState(sessionId: string): SessionModelState | null {
+    if (!this.sessionManager) {
+      return null;
+    }
+
+    const availableModels = this.sessionManager.getAvailableModels();
+    const currentModel = this.sessionManager.getSessionModel(sessionId);
+
+    return {
+      availableModels: availableModels.map((model) => ({
+        modelId: model.id,
+        name: model.name,
+      })),
+      currentModelId: currentModel,
+    };
+  }
+
+  /**
+   * Validates session metadata fields
+   * Throws ProtocolError for invalid metadata, logs warnings for edge cases
+   */
+  private validateSessionMetadata(metadata: Partial<SessionMetadata>): void {
+    if (metadata.name !== undefined) {
+      if (typeof metadata.name !== 'string') {
+        throw new ProtocolError('Session name must be a string');
+      }
+      if (metadata.name.length > 200) {
+        this.logger.warn(
+          'Session name exceeds recommended length of 200 characters',
+          {
+            length: metadata.name.length,
+          }
+        );
+      }
+    }
+
+    if (metadata.tags !== undefined) {
+      if (!Array.isArray(metadata.tags)) {
+        throw new ProtocolError('Session tags must be an array');
+      }
+      for (const tag of metadata.tags) {
+        if (typeof tag !== 'string') {
+          throw new ProtocolError('Session tags must be strings');
+        }
+      }
+    }
+
+    // Validate mode if provided
+    if (metadata.mode !== undefined) {
+      if (typeof metadata.mode !== 'string') {
+        throw new ProtocolError('Session mode must be a string');
+      }
+      const availableModes = this.sessionManager?.getAvailableModes() || [];
+      if (!availableModes.find((m) => m.id === metadata.mode)) {
+        throw new ProtocolError(
+          `Invalid mode: ${metadata.mode}. Available modes: ${availableModes.map((m) => m.id).join(', ')}`
+        );
+      }
+    }
+
+    // Validate model if provided
+    if (metadata.model !== undefined) {
+      if (typeof metadata.model !== 'string') {
+        throw new ProtocolError('Session model must be a string');
+      }
+      const availableModels = this.sessionManager?.getAvailableModels() || [];
+      if (!availableModels.find((m) => m.id === metadata.model)) {
+        throw new ProtocolError(
+          `Invalid model: ${metadata.model}. Available models: ${availableModels.map((m) => m.id).join(', ')}`
+        );
+      }
+    }
+  }
+
+  // ============================================================================
+  // Public Handler Methods for Agent Implementation
+  // ============================================================================
+  // These methods are called by CursorAgentImplementation and adapt the
+  // existing handler methods to work with the SDK's Agent interface.
+
+  /**
+   * Handle initialize from Agent implementation
+   * Updates filesystem provider with connection after initialization
+   */
+  async handleInitializeFromAgent(
+    params: InitializeRequest,
+    connection: AgentSideConnection
+  ): Promise<InitializeResponse> {
+    const response = await this.handleInitialize({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params,
+    } as unknown as Request);
+
+    // Store the connection for filesystem operations
+    this.agentConnection = connection;
+
+    // Per ACP spec: After initialization, update filesystem provider with client capabilities
+    if (this.toolRegistry && this.fileSystemClient) {
+      const clientCapabilities =
+        this.initializationHandler?.getClientCapabilities();
+
+      // Re-register filesystem provider with actual client capabilities
+      if (this.config.tools.filesystem.enabled && clientCapabilities) {
+        // Unregister old provider (if any)
+        this.toolRegistry.unregisterProvider('filesystem');
+
+        // Register new provider with capabilities
+        const filesystemProvider = new FilesystemToolProvider(
+          this.config,
+          this.logger,
+          clientCapabilities,
+          this.fileSystemClient
+        );
+        this.toolRegistry.registerProvider(filesystemProvider);
+
+        this.logger.info(
+          'Filesystem provider updated with client capabilities',
+          {
+            canRead: clientCapabilities.fs?.readTextFile ?? false,
+            canWrite: clientCapabilities.fs?.writeTextFile ?? false,
+          }
+        );
+      }
+    }
+
+    return response.result as InitializeResponse;
+  }
+
+  /**
+   * Handle newSession from Agent implementation
+   */
+  async handleNewSessionFromAgent(
+    params: NewSessionRequest
+  ): Promise<NewSessionResponse> {
+    const response = await this.handleSessionNew({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'session/new',
+      params,
+    } as unknown as Request);
+
+    return response.result as NewSessionResponse;
+  }
+
+  /**
+   * Handle loadSession from Agent implementation
+   */
+  async handleLoadSessionFromAgent(
+    params: LoadSessionRequest
+  ): Promise<LoadSessionResponse> {
+    const response = await this.handleSessionLoad({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'session/load',
+      params,
+    } as unknown as Request);
+
+    return response.result as LoadSessionResponse;
+  }
+
+  /**
+   * Handle setSessionMode from Agent implementation
+   */
+  async handleSetSessionModeFromAgent(
+    params: SetSessionModeRequest
+  ): Promise<SetSessionModeResponse | void> {
+    const response = await this.handleSetSessionMode({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'session/set_mode',
+      params,
+    } as unknown as Request);
+
+    return response.result as SetSessionModeResponse;
+  }
+
+  /**
+   * Handle setSessionModel from Agent implementation
+   */
+  async handleSetSessionModelFromAgent(
+    params: SetSessionModelRequest
+  ): Promise<SetSessionModelResponse | void> {
+    const response = await this.handleSetSessionModel({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'session/set_model',
+      params,
+    } as unknown as Request);
+
+    return response.result as SetSessionModelResponse;
+  }
+
+  /**
+   * Handle prompt from Agent implementation
+   */
+  async handlePromptFromAgent(params: PromptRequest): Promise<PromptResponse> {
+    const response = await this.handleSessionPrompt({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'session/prompt',
+      params,
+    } as unknown as Request);
+
+    return response.result as PromptResponse;
+  }
+
+  /**
+   * Handle cancel from Agent implementation
+   */
+  async handleCancelFromAgent(params: CancelNotification): Promise<void> {
+    await this.handleSessionCancel({
+      jsonrpc: '2.0',
+      id: null,
+      method: 'session/cancel',
+      params,
+    } as unknown as Request);
   }
 
   private async cleanup(): Promise<void> {
