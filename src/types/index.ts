@@ -249,7 +249,6 @@ export interface AdapterConfig {
   tools: {
     filesystem: {
       enabled: boolean;
-      allowedPaths: string[];
     };
     terminal: {
       enabled: boolean;

@@ -9,15 +9,14 @@
  */
 
 import { CursorAgentAdapter } from '../../src/adapter/cursor-agent-adapter';
+import type { AdapterConfig, Logger } from '../../src/types';
 import type {
-  AdapterConfig,
-  AcpRequest,
-  AcpNotification,
-  Logger,
-} from '../../src/types';
+  Request as AcpRequest,
+  Notification as AcpNotification,
+  ClientCapabilities,
+} from '@agentclientprotocol/sdk';
 import { FilesystemToolProvider } from '../../src/tools/filesystem';
 import { AcpFileSystemClient } from '../../src/client/filesystem-client';
-import type { ClientCapabilities } from '@agentclientprotocol/sdk';
 import { promises as fs } from 'fs';
 
 // Mock the CursorCliBridge module
@@ -86,6 +85,9 @@ describe('Tool Calls Integration', () => {
   let adapter: CursorAgentAdapter;
   let sentNotifications: AcpNotification[];
 
+  // Mock client security settings (simulates client-side validation per ACP spec)
+  const mockClientAllowedPaths = ['/tmp'];
+
   const mockConfig: AdapterConfig = {
     logLevel: 'error',
     sessionDir: '/tmp/test-sessions',
@@ -94,7 +96,7 @@ describe('Tool Calls Integration', () => {
     tools: {
       filesystem: {
         enabled: false, // Disabled in config, manually registered in beforeEach
-        allowedPaths: ['/tmp'],
+        // Note: Security validation now done by mock client (simulates ACP client behavior)
       },
       terminal: {
         enabled: true,
@@ -141,9 +143,8 @@ describe('Tool Calls Integration', () => {
     const mockFileSystemClient = new AcpFileSystemClient(
       {
         async readTextFile(params: any) {
-          // Validate path is within allowed paths (simulating client-side security)
-          const allowedPaths = mockConfig.tools.filesystem.allowedPaths || [];
-          const isAllowed = allowedPaths.some((allowed) =>
+          // Validate path is within allowed paths (client-side validation per ACP spec)
+          const isAllowed = mockClientAllowedPaths.some((allowed) =>
             params.path.startsWith(allowed)
           );
           if (!isAllowed) {
@@ -154,9 +155,8 @@ describe('Tool Calls Integration', () => {
           return { content };
         },
         async writeTextFile(params: any) {
-          // Validate path is within allowed paths (simulating client-side security)
-          const allowedPaths = mockConfig.tools.filesystem.allowedPaths || [];
-          const isAllowed = allowedPaths.some((allowed) =>
+          // Validate path is within allowed paths (client-side validation per ACP spec)
+          const isAllowed = mockClientAllowedPaths.some((allowed) =>
             params.path.startsWith(allowed)
           );
           if (!isAllowed) {

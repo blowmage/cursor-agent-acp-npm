@@ -117,6 +117,9 @@ describe('Tool System Integration', () => {
   let tempDir: string;
   let testProjectDir: string;
 
+  // Mock client security settings (simulates client-side validation per ACP spec)
+  let mockClientAllowedPaths: string[];
+
   beforeAll(async () => {
     // Use mock paths - fs module is mocked so no real directories created
     tempDir = '/mock/temp/cursor-acp-tools-123';
@@ -131,6 +134,9 @@ describe('Tool System Integration', () => {
   });
 
   beforeEach(() => {
+    // Initialize mock client security settings (simulates client-side validation per ACP spec)
+    mockClientAllowedPaths = [tempDir];
+
     mockConfig = {
       logLevel: 'debug',
       sessionDir: path.join(tempDir, 'sessions'),
@@ -139,7 +145,7 @@ describe('Tool System Integration', () => {
       tools: {
         filesystem: {
           enabled: false, // Disabled in config, manually registered in beforeEach
-          allowedPaths: [tempDir],
+          // Note: Security validation now done by mock client (simulates ACP client behavior)
         },
         terminal: {
           enabled: true,
@@ -180,9 +186,8 @@ describe('Tool System Integration', () => {
     const mockFileSystemClient = new AcpFileSystemClient(
       {
         async readTextFile(params: any) {
-          // Validate path is within allowed paths (simulating client-side security)
-          const allowedPaths = mockConfig.tools.filesystem.allowedPaths || [];
-          const isAllowed = allowedPaths.some((allowed) =>
+          // Validate path is within allowed paths (client-side validation per ACP spec)
+          const isAllowed = mockClientAllowedPaths.some((allowed) =>
             params.path.startsWith(allowed)
           );
           if (!isAllowed) {
@@ -193,9 +198,8 @@ describe('Tool System Integration', () => {
           return { content };
         },
         async writeTextFile(params: any) {
-          // Validate path is within allowed paths (simulating client-side security)
-          const allowedPaths = mockConfig.tools.filesystem.allowedPaths || [];
-          const isAllowed = allowedPaths.some((allowed) =>
+          // Validate path is within allowed paths (client-side validation per ACP spec)
+          const isAllowed = mockClientAllowedPaths.some((allowed) =>
             params.path.startsWith(allowed)
           );
           if (!isAllowed) {
@@ -293,11 +297,11 @@ describe('Tool System Integration', () => {
           ...mockConfig.tools,
           filesystem: {
             enabled: true,
-            allowedPaths: [],
+            // Note: Path validation removed - security now enforced by ACP client
           },
           terminal: {
             enabled: true,
-            maxProcesses: 0,
+            maxProcesses: 0, // Invalid: should be at least 1
           },
         },
       };
@@ -306,7 +310,7 @@ describe('Tool System Integration', () => {
       const errors = badRegistry.validateConfiguration();
 
       expect(errors.length).toBeGreaterThan(0);
-      expect(errors.some((e) => e.includes('allowed paths'))).toBe(true);
+      // Should catch invalid maxProcesses
       expect(errors.some((e) => e.includes('maxProcesses'))).toBe(true);
     });
   });

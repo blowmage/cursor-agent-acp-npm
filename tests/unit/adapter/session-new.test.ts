@@ -43,7 +43,7 @@ const testConfig: AdapterConfig = {
   tools: {
     filesystem: {
       enabled: false, // Disabled for adapter tests - not testing filesystem
-      allowedPaths: ['/tmp', './'],
+      // Note: allowedPaths removed - security now enforced by ACP client
     },
     terminal: {
       enabled: true,

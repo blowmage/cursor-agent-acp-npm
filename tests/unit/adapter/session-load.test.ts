@@ -36,7 +36,6 @@ const testConfig: AdapterConfig = {
   tools: {
     filesystem: {
       enabled: false, // Disabled for adapter tests - not testing filesystem
-      allowedPaths: ['/tmp', './'],
     },
     terminal: {
       enabled: true,

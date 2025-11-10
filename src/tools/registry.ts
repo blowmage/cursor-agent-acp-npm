@@ -450,10 +450,6 @@ export class ToolRegistry {
       if (!this.hasTool('read_file') || !this.hasTool('write_file')) {
         errors.push('Filesystem tools enabled but not properly registered');
       }
-
-      if (this.config.tools.filesystem.allowedPaths.length === 0) {
-        errors.push('Filesystem tools enabled but no allowed paths configured');
-      }
     }
 
     // Check if terminal tools are configured correctly

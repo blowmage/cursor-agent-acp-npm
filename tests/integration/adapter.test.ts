@@ -13,16 +13,15 @@
  */
 
 import { CursorAgentAdapter } from '../../src/adapter/cursor-agent-adapter';
+import type { AdapterConfig, Logger } from '../../src/types';
 import type {
-  AdapterConfig,
-  AcpRequest,
-  AcpResponse,
-  Logger,
-} from '../../src/types';
+  Request as AcpRequest,
+  Response as AcpResponse,
+  ClientCapabilities,
+} from '@agentclientprotocol/sdk';
 import { MockCursorCliBridge } from './mocks/cursor-bridge-mock';
 import { FilesystemToolProvider } from '../../src/tools/filesystem';
 import { AcpFileSystemClient } from '../../src/client/filesystem-client';
-import type { ClientCapabilities } from '@agentclientprotocol/sdk';
 import { promises as fs } from 'fs';
 
 // Mock the CursorCliBridge module
@@ -43,6 +42,9 @@ const mockLogger: Logger = {
   debug: jest.fn(),
 };
 
+// Mock client security settings (simulates client-side validation per ACP spec)
+const mockClientAllowedPaths = ['/tmp', './'];
+
 // Test configuration
 const testConfig: AdapterConfig = {
   logLevel: 'debug',
@@ -52,7 +54,7 @@ const testConfig: AdapterConfig = {
   tools: {
     filesystem: {
       enabled: false, // Disabled in config, manually registered in beforeEach
-      allowedPaths: ['/tmp', './'],
+      // Note: Security validation now done by mock client (simulates ACP client behavior)
     },
     terminal: {
       enabled: true,
@@ -85,9 +87,8 @@ describe('CursorAgentAdapter Integration', () => {
     const mockFileSystemClient = new AcpFileSystemClient(
       {
         async readTextFile(params: any) {
-          // Validate path is within allowed paths (simulating client-side security)
-          const allowedPaths = testConfig.tools.filesystem.allowedPaths || [];
-          const isAllowed = allowedPaths.some((allowed) =>
+          // Validate path is within allowed paths (client-side validation per ACP spec)
+          const isAllowed = mockClientAllowedPaths.some((allowed) =>
             params.path.startsWith(allowed)
           );
           if (!isAllowed) {
@@ -98,9 +99,8 @@ describe('CursorAgentAdapter Integration', () => {
           return { content };
         },
         async writeTextFile(params: any) {
-          // Validate path is within allowed paths (simulating client-side security)
-          const allowedPaths = testConfig.tools.filesystem.allowedPaths || [];
-          const isAllowed = allowedPaths.some((allowed) =>
+          // Validate path is within allowed paths (client-side validation per ACP spec)
+          const isAllowed = mockClientAllowedPaths.some((allowed) =>
             params.path.startsWith(allowed)
           );
           if (!isAllowed) {
@@ -109,12 +109,6 @@ describe('CursorAgentAdapter Integration', () => {
           // Use local fs for integration tests
           await fs.writeFile(params.path, params.content, 'utf-8');
           return {};
-        },
-        async requestPermission() {
-          return { outcome: 'approve' as const };
-        },
-        async createTerminal() {
-          return { id: 'mock-terminal' };
         },
       },
       mockLogger
@@ -178,7 +172,7 @@ describe('CursorAgentAdapter Integration', () => {
         tools: {
           filesystem: {
             enabled: true,
-            allowedPaths: [], // Invalid: empty paths
+            // Note: Path validation removed - security now enforced by ACP client
           },
           terminal: {
             enabled: true,

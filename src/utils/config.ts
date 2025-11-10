@@ -4,8 +4,6 @@
  * Provides validation functions for the Cursor Agent ACP Adapter configuration.
  */
 
-import { homedir } from 'os';
-import { resolve } from 'path';
 import type {
   AdapterConfig,
   ValidationResult,
@@ -45,11 +43,6 @@ const CONFIG_VALIDATION_RULES: ConfigValidationRule[] = [
   {
     path: 'tools.filesystem.enabled',
     type: 'boolean',
-    required: true,
-  },
-  {
-    path: 'tools.filesystem.allowedPaths',
-    type: 'array',
     required: true,
   },
   {
@@ -181,32 +174,5 @@ function performCustomValidations(config: AdapterConfig): string[] {
     );
   }
 
-  // Validate filesystem paths are not dangerous
-  const dangerousPaths = [
-    '/etc',
-    '/usr',
-    '/System',
-    'C:\\Windows',
-    'C:\\Program Files',
-  ];
-  for (const path of config.tools.filesystem.allowedPaths) {
-    const resolvedPath = resolvePath(path);
-    if (
-      dangerousPaths.some((dangerous) => resolvedPath.startsWith(dangerous))
-    ) {
-      errors.push(`Potentially dangerous filesystem path: ${path}`);
-    }
-  }
-
   return errors;
-}
-
-/**
- * Resolves paths including ~ for home directory
- */
-function resolvePath(path: string): string {
-  if (path.startsWith('~')) {
-    return resolve(homedir(), path.slice(1));
-  }
-  return resolve(path);
 }

@@ -613,7 +613,7 @@ export class InitializationHandler {
     if (clientVersion === null || clientVersion === undefined) {
       throw new ProtocolError(
         'Protocol version is required in initialize request. ' +
-          `This agent supports versions: ${[...SUPPORTED_VERSIONS].join(', ')}. ` +
+          `This agent supports versions: ${SUPPORTED_VERSIONS.join(', ')}. ` +
           'Please specify "protocolVersion" in your request.'
       );
     }

@@ -65,7 +65,6 @@ describe('Prompt Turn Integration Tests', () => {
       tools: {
         filesystem: {
           enabled: false, // Disabled for integration tests - not testing filesystem
-          allowedPaths: ['/tmp'],
         },
         terminal: {
           enabled: true,

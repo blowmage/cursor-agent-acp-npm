@@ -32,7 +32,6 @@ interface CliOptions {
   sessionTimeout: string;
   noFilesystem?: boolean;
   noTerminal?: boolean;
-  allowedPaths: string;
   maxProcesses: string;
   verbose?: boolean;
   quiet?: boolean;
@@ -99,11 +98,6 @@ program
   )
   .option('--no-filesystem', 'disable filesystem tools')
   .option('--no-terminal', 'disable terminal tools')
-  .option(
-    '--allowed-paths <paths>',
-    'comma-separated list of allowed filesystem paths',
-    './'
-  )
   .option(
     '--max-processes <count>',
     'maximum number of terminal processes',
@@ -246,9 +240,6 @@ async function main(): Promise<void> {
     }
     if (options.sessionTimeout) {
       config.sessionTimeout = parseInt(options.sessionTimeout, 10);
-    }
-    if (options.allowedPaths) {
-      config.tools.filesystem.allowedPaths = options.allowedPaths.split(',');
     }
     if (options.maxProcesses) {
       config.tools.terminal.maxProcesses = parseInt(options.maxProcesses, 10);
