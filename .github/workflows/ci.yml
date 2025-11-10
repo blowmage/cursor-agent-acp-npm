@@ -37,5 +37,5 @@ jobs:
       - name: Run linter
         run: npm run lint
 
-      - name: Check code formatting
-        run: npm run format:check
+      - name: Run formatter
+        run: npm run format
