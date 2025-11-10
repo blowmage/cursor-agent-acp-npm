@@ -9,12 +9,15 @@
  */
 
 import { CursorAgentAdapter } from '../../src/adapter/cursor-agent-adapter';
+import type { AdapterConfig, Logger } from '../../src/types';
 import type {
-  AdapterConfig,
-  AcpRequest,
-  AcpNotification,
-  Logger,
-} from '../../src/types';
+  Request as AcpRequest,
+  Notification as AcpNotification,
+  ClientCapabilities,
+} from '@agentclientprotocol/sdk';
+import { FilesystemToolProvider } from '../../src/tools/filesystem';
+import { AcpFileSystemClient } from '../../src/client/filesystem-client';
+import { promises as fs } from 'fs';
 
 // Mock the CursorCliBridge module
 jest.mock('../../src/cursor/cli-bridge', () => ({
@@ -25,6 +28,50 @@ jest.mock('../../src/cursor/cli-bridge', () => ({
     );
   }),
 }));
+
+// Mock fs module to avoid real file I/O operations in integration tests
+jest.mock('fs', () => {
+  // Map of mock file contents for testing
+  const mockFiles = new Map<string, string>();
+
+  return {
+    promises: {
+      readFile: jest.fn().mockImplementation(async (filePath: string) => {
+        // Check if file was written by a test
+        if (mockFiles.has(filePath)) {
+          return mockFiles.get(filePath);
+        }
+
+        // Return mock content for test files
+        if (filePath.includes('test.txt')) {
+          return 'mock test file content';
+        }
+
+        if (filePath.includes('test-write.txt')) {
+          return 'written content';
+        }
+
+        // Simulate file not found for non-existent files
+        if (filePath.includes('nonexistent')) {
+          const error: any = new Error(
+            `ENOENT: no such file or directory, open '${filePath}'`
+          );
+          error.code = 'ENOENT';
+          throw error;
+        }
+
+        // Default mock content
+        return 'default mock file content';
+      }),
+      writeFile: jest
+        .fn()
+        .mockImplementation(async (filePath: string, content: string) => {
+          mockFiles.set(filePath, content);
+          return undefined;
+        }),
+    },
+  };
+});
 
 // Mock logger for tests
 const mockLogger: Logger = {
@@ -38,6 +85,9 @@ describe('Tool Calls Integration', () => {
   let adapter: CursorAgentAdapter;
   let sentNotifications: AcpNotification[];
 
+  // Mock client security settings (simulates client-side validation per ACP spec)
+  const mockClientAllowedPaths = ['/tmp'];
+
   const mockConfig: AdapterConfig = {
     logLevel: 'error',
     sessionDir: '/tmp/test-sessions',
@@ -45,8 +95,8 @@ describe('Tool Calls Integration', () => {
     sessionTimeout: 3600000,
     tools: {
       filesystem: {
-        enabled: true,
-        allowedPaths: ['/tmp'],
+        enabled: false, // Disabled in config, manually registered in beforeEach
+        // Note: Security validation now done by mock client (simulates ACP client behavior)
       },
       terminal: {
         enabled: true,
@@ -80,6 +130,67 @@ describe('Tool Calls Integration', () => {
       });
 
     await adapter.initialize();
+
+    // Register filesystem tools with mock client (per ACP architecture)
+    const mockClientCapabilities: ClientCapabilities = {
+      fs: {
+        readTextFile: true,
+        writeTextFile: true,
+      },
+    };
+
+    // Create mock filesystem client for integration tests
+    const mockFileSystemClient = new AcpFileSystemClient(
+      {
+        async readTextFile(params: any) {
+          // Validate path is within allowed paths (client-side validation per ACP spec)
+          const isAllowed = mockClientAllowedPaths.some((allowed) =>
+            params.path.startsWith(allowed)
+          );
+          if (!isAllowed) {
+            throw new Error(`Access to ${params.path} is not allowed`);
+          }
+          // Use mocked fs - no real file I/O
+          const content = await fs.readFile(params.path, 'utf-8');
+          return { content };
+        },
+        async writeTextFile(params: any) {
+          // Validate path is within allowed paths (client-side validation per ACP spec)
+          const isAllowed = mockClientAllowedPaths.some((allowed) =>
+            params.path.startsWith(allowed)
+          );
+          if (!isAllowed) {
+            throw new Error(`Access to ${params.path} is not allowed`);
+          }
+          // Use mocked fs - no real file I/O
+          await fs.writeFile(params.path, params.content, 'utf-8');
+          return {};
+        },
+      },
+      mockLogger
+    );
+
+    const filesystemProvider = new FilesystemToolProvider(
+      {
+        ...mockConfig,
+        tools: {
+          ...mockConfig.tools,
+          filesystem: {
+            ...mockConfig.tools.filesystem,
+            enabled: true, // Enable for provider (even though disabled in adapter config)
+          },
+        },
+      },
+      mockLogger,
+      mockClientCapabilities,
+      mockFileSystemClient
+    );
+
+    // Access the tool registry from the adapter to register filesystem provider
+    const toolRegistry = (adapter as any).toolRegistry;
+    if (toolRegistry) {
+      toolRegistry.registerProvider(filesystemProvider);
+    }
   });
 
   afterEach(async () => {
@@ -120,7 +231,7 @@ describe('Tool Calls Integration', () => {
         params: {
           name: 'read_file',
           parameters: {
-            sessionId,
+            _sessionId: sessionId,
             path: '/tmp/test.txt',
           },
         },
@@ -166,10 +277,10 @@ describe('Tool Calls Integration', () => {
         id: 2,
         method: 'tools/call',
         params: {
-          name: 'list_directory',
+          name: 'read_file',
           parameters: {
-            sessionId,
-            path: '/tmp',
+            _sessionId: sessionId,
+            path: '/tmp/test.txt',
           },
         },
       };
@@ -204,7 +315,7 @@ describe('Tool Calls Integration', () => {
 
       const toolTests = [
         { name: 'read_file', expectedKind: 'read' },
-        { name: 'list_directory', expectedKind: 'read' },
+        { name: 'write_file', expectedKind: 'edit' }, // write_file is an 'edit' kind tool per ACP spec
       ];
 
       for (const test of toolTests) {
@@ -218,8 +329,12 @@ describe('Tool Calls Integration', () => {
             name: test.name,
             parameters:
               test.name === 'read_file'
-                ? { sessionId, path: '/tmp/test.txt' }
-                : { sessionId, path: '/tmp' },
+                ? { _sessionId: sessionId, path: '/tmp/test.txt' }
+                : {
+                    _sessionId: sessionId,
+                    path: '/tmp/test-write.txt',
+                    content: 'test',
+                  },
           },
         };
 
@@ -256,10 +371,10 @@ describe('Tool Calls Integration', () => {
         id: 2,
         method: 'tools/call',
         params: {
-          name: 'list_directory',
+          name: 'read_file',
           parameters: {
-            sessionId,
-            path: '/tmp',
+            _sessionId: sessionId,
+            path: '/tmp/test.txt',
           },
         },
       };
@@ -301,7 +416,7 @@ describe('Tool Calls Integration', () => {
         params: {
           name: 'read_file',
           parameters: {
-            sessionId,
+            _sessionId: sessionId,
             path: '/tmp/nonexistent-file-12345.txt',
           },
         },
@@ -342,10 +457,10 @@ describe('Tool Calls Integration', () => {
         id: 2,
         method: 'tools/call',
         params: {
-          name: 'list_directory',
+          name: 'read_file',
           parameters: {
-            sessionId,
-            path: '/tmp',
+            _sessionId: sessionId,
+            path: '/tmp/test.txt',
           },
         },
       };
@@ -453,9 +568,9 @@ describe('Tool Calls Integration', () => {
         id: 1,
         method: 'tools/call',
         params: {
-          name: 'list_directory',
+          name: 'read_file',
           parameters: {
-            path: '/tmp',
+            path: '/tmp/test.txt',
           },
         },
       };

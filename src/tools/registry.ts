@@ -16,7 +16,6 @@ import {
   type ToolCall,
   type ToolResult,
 } from '../types';
-import { FilesystemToolProvider } from './filesystem';
 import { TerminalToolProvider } from './terminal';
 import { CursorToolsProvider } from './cursor-tools';
 import type { ToolCallManager } from './tool-call-manager';
@@ -200,7 +199,16 @@ export class ToolRegistry {
       }
 
       // Execute the tool
-      const result = await tool.handler(toolCall.parameters);
+      // Per ACP spec: Inject sessionId into parameters for ACP operations
+      // The _sessionId parameter is used by ACP-compliant tools (filesystem, etc.)
+      const paramsWithSession = sessionId
+        ? {
+            ...toolCall.parameters,
+            _sessionId: sessionId,
+          }
+        : toolCall.parameters;
+
+      const result = await tool.handler(paramsWithSession);
 
       const duration = Date.now() - startTime;
       this.logger.debug(`Tool executed in ${duration}ms: ${toolCall.name}`);
@@ -341,14 +349,11 @@ export class ToolRegistry {
   private getToolKind(toolName: string): ToolKind {
     // Map tool names to ACP tool kinds
     const kindMap: Record<string, ToolKind> = {
-      // Filesystem tools
+      // Filesystem tools (ACP-compliant only)
       read_file: 'read',
       write_file: 'edit',
-      list_directory: 'read',
-      delete_file: 'delete',
       move_file: 'move',
       copy_file: 'read',
-      create_directory: 'edit',
 
       // Terminal tools
       execute_command: 'execute',
@@ -381,10 +386,6 @@ export class ToolRegistry {
         return `Reading file: ${parameters['path'] || 'unknown'}`;
       case 'write_file':
         return `Writing file: ${parameters['path'] || 'unknown'}`;
-      case 'list_directory':
-        return `Listing directory: ${parameters['path'] || 'unknown'}`;
-      case 'delete_file':
-        return `Deleting file: ${parameters['path'] || 'unknown'}`;
       case 'move_file':
         return `Moving file: ${parameters['source'] || 'unknown'} → ${parameters['destination'] || 'unknown'}`;
       case 'execute_command':
@@ -449,10 +450,6 @@ export class ToolRegistry {
       if (!this.hasTool('read_file') || !this.hasTool('write_file')) {
         errors.push('Filesystem tools enabled but not properly registered');
       }
-
-      if (this.config.tools.filesystem.allowedPaths.length === 0) {
-        errors.push('Filesystem tools enabled but no allowed paths configured');
-      }
     }
 
     // Check if terminal tools are configured correctly
@@ -506,14 +503,12 @@ export class ToolRegistry {
   private initializeProviders(): void {
     this.logger.debug('Initializing built-in tool providers');
 
-    // Initialize filesystem tools
-    if (this.config.tools.filesystem.enabled) {
-      const filesystemProvider = new FilesystemToolProvider(
-        this.config,
-        this.logger
-      );
-      this.registerProvider(filesystemProvider);
-    }
+    // Note: Filesystem tools are NOT initialized here anymore
+    // Per ACP spec: FilesystemToolProvider now requires AgentSideConnection
+    // and ClientCapabilities, which are only available after the connection
+    // is established. The adapter will initialize filesystem tools after
+    // connection setup via registerProvider().
+    // See: src/adapter/cursor-agent-adapter.ts
 
     // Initialize terminal tools
     if (this.config.tools.terminal.enabled) {

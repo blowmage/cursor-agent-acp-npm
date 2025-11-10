@@ -35,8 +35,7 @@ const testConfig: AdapterConfig = {
   sessionTimeout: 60000,
   tools: {
     filesystem: {
-      enabled: true,
-      allowedPaths: ['/tmp', './'],
+      enabled: false, // Disabled for adapter tests - not testing filesystem
     },
     terminal: {
       enabled: true,

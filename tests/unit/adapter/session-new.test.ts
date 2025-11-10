@@ -42,8 +42,8 @@ const testConfig: AdapterConfig = {
   sessionTimeout: 60000,
   tools: {
     filesystem: {
-      enabled: true,
-      allowedPaths: ['/tmp', './'],
+      enabled: false, // Disabled for adapter tests - not testing filesystem
+      // Note: allowedPaths removed - security now enforced by ACP client
     },
     terminal: {
       enabled: true,

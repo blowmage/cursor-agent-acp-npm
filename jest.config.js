@@ -16,6 +16,11 @@ module.exports = {
     '^@tests/(.*)$': '<rootDir>/tests/$1',
   },
 
+  // Transform ES modules from node_modules that Jest can't handle
+  transformIgnorePatterns: [
+    'node_modules/(?!(@agentclientprotocol|zod)/)',
+  ],
+
   setupFilesAfterEnv: ['<rootDir>/tests/setup.ts'],
   // globalTeardown: '<rootDir>/tests/teardown.js', // Disabled for unit tests
 

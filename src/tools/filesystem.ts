@@ -1,46 +1,120 @@
 /**
- * Filesystem Tool Provider
+ * ACP-Compliant Filesystem Tool Provider
  *
- * Provides secure file system operations for the ACP adapter.
- * Includes path validation and permission checks to prevent unauthorized access.
+ * Provides file system tools that use ACP client methods to access the
+ * client's file system (including unsaved editor changes).
+ *
+ * @see {@link https://agentclientprotocol.com/protocol/file-system | ACP File System Specification}
+ * @see {@link https://www.npmjs.com/package/@agentclientprotocol/sdk | ACP TypeScript SDK}
+ *
+ * ## ACP Compliance
+ *
+ * This implementation strictly follows the ACP standard by:
+ * - ✅ Calling client methods (`fs/read_text_file`, `fs/write_text_file`)
+ * - ✅ Checking client capabilities before offering tools
+ * - ✅ Passing `sessionId` to all operations
+ * - ✅ Accessing client's file system (not server's)
+ * - ✅ Including unsaved editor changes (when supported by client)
+ *
+ * ## Capability Requirements
+ *
+ * Tools are only offered if the client advertises support in `clientCapabilities.fs`:
+ * - `read_file` tool → requires `fs.readTextFile: true`
+ * - `write_file` tool → requires `fs.writeTextFile: true`
+ *
+ * ## Security Model
+ *
+ * Security is enforced by the **client**, not this provider:
+ * - Client validates paths and enforces sandboxing
+ * - Client handles permissions and access controls
+ * - Client manages file locks and concurrent access
+ *
+ * @example
+ * ```typescript
+ * // Register the filesystem provider
+ * const fsClient = new AcpFileSystemClient(connection, logger);
+ * const provider = new FilesystemToolProvider(
+ *   config,
+ *   logger,
+ *   clientCapabilities,
+ *   fsClient
+ * );
+ * toolRegistry.registerProvider(provider);
+ * ```
  */
 
-import { promises as fs } from 'fs';
-import * as path from 'path';
-import {
-  ToolError,
-  type AdapterConfig,
-  type Logger,
-  type Tool,
-  type ToolProvider,
-  type ToolResult,
+import type {
+  AdapterConfig,
+  Logger,
+  Tool,
+  ToolProvider,
+  ToolResult,
 } from '../types';
+import type { FileSystemClient } from '../client/filesystem-client';
+import type { ClientCapabilities } from '@agentclientprotocol/sdk';
 
 export interface FileSystemConfig {
   enabled: boolean;
-  allowedPaths: string[];
-  maxFileSize?: number; // in bytes
-  allowedExtensions?: string[];
-  forbiddenPaths?: string[];
+  // Retry configuration
+  retries?: number;
+  retryDelay?: number;
+  // Timeout configuration
+  timeout?: number;
+  // Metrics
+  enableMetrics?: boolean;
 }
 
+/**
+ * ACP-compliant error for file system operations
+ * Uses standard JSON-RPC error codes per ACP specification
+ */
+export class AcpFileSystemError extends Error {
+  constructor(
+    message: string,
+    public readonly code: number = -32603,
+    public readonly data?: unknown
+  ) {
+    super(message);
+    this.name = 'AcpFileSystemError';
+  }
+
+  toJsonRpcError(): { code: number; message: string; data?: unknown } {
+    const result: { code: number; message: string; data?: unknown } = {
+      code: this.code,
+      message: this.message,
+    };
+    if (this.data !== undefined) {
+      result.data = this.data;
+    }
+    return result;
+  }
+}
+
+/**
+ * ACP-compliant file system tool provider
+ *
+ * Only offers tools when client advertises support for file system capabilities.
+ * All operations go through the ACP connection to access the client's file system.
+ */
 export class FilesystemToolProvider implements ToolProvider {
   readonly name = 'filesystem';
   readonly description =
-    'File system operations (read, write, list, create directories)';
+    'File system operations via ACP client methods (read/write text files)';
 
-  // private config: AdapterConfig; // Not needed for current implementation
-  private logger: Logger;
   private fsConfig: FileSystemConfig;
 
-  constructor(config: AdapterConfig, logger: Logger) {
-    // this.config = config; // Not needed for current implementation
-    this.logger = logger;
+  constructor(
+    config: AdapterConfig,
+    private logger: Logger,
+    private clientCapabilities: ClientCapabilities | null,
+    private fileSystemClient: FileSystemClient
+  ) {
     this.fsConfig = config.tools.filesystem;
 
-    this.logger.debug('FilesystemToolProvider initialized', {
+    this.logger.debug('FilesystemToolProvider initialized (ACP-compliant)', {
       enabled: this.fsConfig.enabled,
-      allowedPaths: this.fsConfig.allowedPaths,
+      clientSupportsRead: this.clientCapabilities?.fs?.readTextFile ?? false,
+      clientSupportsWrite: this.clientCapabilities?.fs?.writeTextFile ?? false,
     });
   }
 
@@ -50,515 +124,579 @@ export class FilesystemToolProvider implements ToolProvider {
       return [];
     }
 
-    return [
-      {
+    // Enhanced capability checking with better feedback
+    if (!this.clientCapabilities) {
+      this.logger.warn(
+        'Client capabilities not yet initialized - filesystem tools unavailable'
+      );
+      return [];
+    }
+
+    if (!this.clientCapabilities.fs) {
+      this.logger.info(
+        'Client does not advertise file system capabilities - no fs tools offered',
+        {
+          availableCapabilities: Object.keys(this.clientCapabilities),
+        }
+      );
+      return [];
+    }
+
+    const tools: Tool[] = [];
+    const fsCapabilities = this.clientCapabilities.fs;
+
+    this.logger.debug('Client file system capabilities detected', {
+      readTextFile: fsCapabilities.readTextFile ?? false,
+      writeTextFile: fsCapabilities.writeTextFile ?? false,
+    });
+
+    // read_file tool (requires fs.readTextFile capability)
+    // Per ACP spec: fs/read_text_file method
+    if (this.clientCapabilities.fs.readTextFile) {
+      tools.push({
         name: 'read_file',
-        description: 'Read the contents of a file',
+        description:
+          'Read a text file from the client workspace (includes unsaved changes in editor). ' +
+          'Can read full file or specific line ranges for efficiency.',
         parameters: {
           type: 'object',
           properties: {
             path: {
               type: 'string',
-              description: 'Path to the file to read',
+              description:
+                'Absolute path to the file to read (relative to client workspace)',
+            },
+            line: {
+              type: 'number',
+              description:
+                'Optional: Start reading from this line number (1-based). ' +
+                'Useful for reading specific sections of large files.',
+            },
+            limit: {
+              type: 'number',
+              description:
+                'Optional: Maximum number of lines to read. ' +
+                'Useful for preventing memory issues with large files.',
             },
           },
           required: ['path'],
         },
         handler: this.readFile.bind(this),
-      },
-      {
+      });
+    } else {
+      this.logger.debug(
+        'Client does not support fs.readTextFile - read_file tool not offered'
+      );
+    }
+
+    // write_file tool (requires fs.writeTextFile capability)
+    // Per ACP spec: fs/write_text_file method
+    if (this.clientCapabilities.fs.writeTextFile) {
+      tools.push({
         name: 'write_file',
-        description: 'Write content to a file',
+        description:
+          'Write content to a text file in the client workspace. ' +
+          'Client handles directory creation and permissions.',
         parameters: {
           type: 'object',
           properties: {
             path: {
               type: 'string',
-              description: 'Path to the file to write',
+              description:
+                'Absolute path to the file to write (relative to client workspace)',
             },
             content: {
               type: 'string',
               description: 'Content to write to the file',
             },
-            encoding: {
-              type: 'string',
-              description: 'Text encoding (default: utf8)',
-              enum: ['utf8', 'ascii', 'base64', 'binary'],
-            },
           },
           required: ['path', 'content'],
         },
         handler: this.writeFile.bind(this),
-      },
+      });
+    } else {
+      this.logger.debug(
+        'Client does not support fs.writeTextFile - write_file tool not offered'
+      );
+    }
+
+    this.logger.info(
+      `Offering ${tools.length} ACP-compliant file system tools`,
       {
-        name: 'list_directory',
-        description: 'List the contents of a directory',
-        parameters: {
-          type: 'object',
-          properties: {
-            path: {
-              type: 'string',
-              description: 'Path to the directory to list',
-            },
-            recursive: {
-              type: 'boolean',
-              description: 'Whether to list recursively (default: false)',
-            },
-            show_hidden: {
-              type: 'boolean',
-              description: 'Whether to show hidden files (default: false)',
-            },
-          },
-          required: ['path'],
-        },
-        handler: this.listDirectory.bind(this),
-      },
-      {
-        name: 'create_directory',
-        description: 'Create a new directory',
-        parameters: {
-          type: 'object',
-          properties: {
-            path: {
-              type: 'string',
-              description: 'Path to the directory to create',
-            },
-            recursive: {
-              type: 'boolean',
-              description:
-                'Whether to create parent directories (default: true)',
-            },
-          },
-          required: ['path'],
-        },
-        handler: this.createDirectory.bind(this),
-      },
-      {
-        name: 'delete_file',
-        description: 'Delete a file or directory',
-        parameters: {
-          type: 'object',
-          properties: {
-            path: {
-              type: 'string',
-              description: 'Path to the file or directory to delete',
-            },
-            recursive: {
-              type: 'boolean',
-              description:
-                'Whether to delete directories recursively (default: false)',
-            },
-          },
-          required: ['path'],
-        },
-        handler: this.deleteFile.bind(this),
-      },
-      {
-        name: 'get_file_info',
-        description: 'Get information about a file or directory',
-        parameters: {
-          type: 'object',
-          properties: {
-            path: {
-              type: 'string',
-              description: 'Path to the file or directory',
-            },
-          },
-          required: ['path'],
-        },
-        handler: this.getFileInfo.bind(this),
-      },
-    ];
+        canRead: this.clientCapabilities.fs.readTextFile ?? false,
+        canWrite: this.clientCapabilities.fs.writeTextFile ?? false,
+      }
+    );
+
+    return tools;
   }
 
   /**
-   * Read file contents
+   * Read file contents via ACP client method with retry logic
+   *
+   * Per ACP spec: Calls fs/read_text_file on the client
    */
   private async readFile(params: Record<string, any>): Promise<ToolResult> {
-    try {
-      const filePath = this.validateAndResolvePath(params['path']);
+    const maxRetries = this.fsConfig.retries ?? 3;
+    const retryDelay = this.fsConfig.retryDelay ?? 1000;
+    const enableMetrics = this.fsConfig.enableMetrics ?? false;
 
-      this.logger.debug('Reading file', { path: filePath });
+    let lastError: Error | undefined;
 
-      // Check file size
-      const stats = await fs.stat(filePath);
-      const maxSize = this.fsConfig.maxFileSize || 10 * 1024 * 1024; // 10MB default
-
-      if (stats.size > maxSize) {
-        throw new ToolError(
-          `File too large: ${stats.size} bytes (max: ${maxSize} bytes)`,
-          'read_file'
-        );
-      }
-
-      // Check if it's a file
-      if (!stats.isFile()) {
-        throw new ToolError(`Path is not a file: ${filePath}`, 'read_file');
-      }
-
-      const content = await fs.readFile(filePath, 'utf8');
-
-      return {
-        success: true,
-        result: {
-          content,
-          size: stats.size,
-          encoding: 'utf8',
-          path: filePath,
-        },
-        metadata: {
-          fileSize: stats.size,
-          lastModified: stats.mtime.toISOString(),
-        },
-      };
-    } catch (error) {
-      this.logger.error('Failed to read file', { error, path: params['path'] });
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
-  }
-
-  /**
-   * Write file contents
-   */
-  private async writeFile(params: Record<string, any>): Promise<ToolResult> {
-    try {
-      const filePath = this.validateAndResolvePath(params['path']);
-      const content = params['content'];
-      const encoding = params['encoding'] || 'utf8';
-
-      this.logger.debug('Writing file', {
-        path: filePath,
-        contentLength: content.length,
-        encoding,
-      });
-
-      // Ensure directory exists
-      const dir = path.dirname(filePath);
-      await fs.mkdir(dir, { recursive: true });
-
-      // Write file
-      await fs.writeFile(filePath, content, encoding as 'utf8' | 'utf-8');
-
-      // Get file stats
-      const stats = await fs.stat(filePath);
-
-      return {
-        success: true,
-        result: {
-          path: filePath,
-          size: stats.size,
-          encoding,
-        },
-        metadata: {
-          fileSize: stats.size,
-          created: stats.birthtime.toISOString(),
-          modified: stats.mtime.toISOString(),
-        },
-      };
-    } catch (error) {
-      this.logger.error('Failed to write file', {
-        error,
-        path: params['path'],
-      });
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
-  }
-
-  /**
-   * List directory contents
-   */
-  private async listDirectory(
-    params: Record<string, any>
-  ): Promise<ToolResult> {
-    try {
-      const dirPath = this.validateAndResolvePath(params['path']);
-      const recursive = params['recursive'] || false;
-      const showHidden = params['show_hidden'] || false;
-
-      this.logger.debug('Listing directory', {
-        path: dirPath,
-        recursive,
-        showHidden,
-      });
-
-      // Check if it's a directory
-      const stats = await fs.stat(dirPath);
-      if (!stats.isDirectory()) {
-        throw new ToolError(
-          `Path is not a directory: ${dirPath}`,
-          'list_directory'
-        );
-      }
-
-      const entries = await this.listDirectoryRecursive(
-        dirPath,
-        recursive,
-        showHidden
-      );
-
-      return {
-        success: true,
-        result: {
-          path: dirPath,
-          entries,
-          total: entries.length,
-        },
-        metadata: {
-          recursive,
-          showHidden,
-          scannedAt: new Date().toISOString(),
-        },
-      };
-    } catch (error) {
-      this.logger.error('Failed to list directory', {
-        error,
-        path: params['path'],
-      });
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
-  }
-
-  /**
-   * Create directory
-   */
-  private async createDirectory(
-    params: Record<string, any>
-  ): Promise<ToolResult> {
-    try {
-      const dirPath = this.validateAndResolvePath(params['path']);
-      const recursive = params['recursive'] !== false; // default true
-
-      this.logger.debug('Creating directory', { path: dirPath, recursive });
-
-      await fs.mkdir(dirPath, { recursive });
-
-      const stats = await fs.stat(dirPath);
-
-      return {
-        success: true,
-        result: {
-          path: dirPath,
-          created: true,
-        },
-        metadata: {
-          recursive,
-          createdAt: stats.birthtime.toISOString(),
-        },
-      };
-    } catch (error) {
-      this.logger.error('Failed to create directory', {
-        error,
-        path: params['path'],
-      });
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
-  }
-
-  /**
-   * Delete file or directory
-   */
-  private async deleteFile(params: Record<string, any>): Promise<ToolResult> {
-    try {
-      const targetPath = this.validateAndResolvePath(params['path']);
-      const recursive = params['recursive'] || false;
-
-      this.logger.debug('Deleting file/directory', {
-        path: targetPath,
-        recursive,
-      });
-
-      const stats = await fs.stat(targetPath);
-
-      if (stats.isDirectory()) {
-        if (recursive) {
-          await fs.rm(targetPath, { recursive: true, force: true });
-        } else {
-          await fs.rmdir(targetPath);
-        }
-      } else {
-        await fs.unlink(targetPath);
-      }
-
-      return {
-        success: true,
-        result: {
-          path: targetPath,
-          deleted: true,
-          wasDirectory: stats.isDirectory(),
-        },
-        metadata: {
-          recursive,
-          deletedAt: new Date().toISOString(),
-          originalSize: stats.size,
-        },
-      };
-    } catch (error) {
-      this.logger.error('Failed to delete file/directory', {
-        error,
-        path: params['path'],
-      });
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
-  }
-
-  /**
-   * Get file information
-   */
-  private async getFileInfo(params: Record<string, any>): Promise<ToolResult> {
-    try {
-      const targetPath = this.validateAndResolvePath(params['path']);
-
-      this.logger.debug('Getting file info', { path: targetPath });
-
-      const stats = await fs.stat(targetPath);
-
-      return {
-        success: true,
-        result: {
-          path: targetPath,
-          size: stats.size,
-          isFile: stats.isFile(),
-          isDirectory: stats.isDirectory(),
-          isSymbolicLink: stats.isSymbolicLink(),
-          permissions: stats.mode,
-          created: stats.birthtime.toISOString(),
-          modified: stats.mtime.toISOString(),
-          accessed: stats.atime.toISOString(),
-        },
-        metadata: {
-          dev: stats.dev,
-          ino: stats.ino,
-          nlink: stats.nlink,
-          uid: stats.uid,
-          gid: stats.gid,
-        },
-      };
-    } catch (error) {
-      this.logger.error('Failed to get file info', {
-        error,
-        path: params['path'],
-      });
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
-  }
-
-  /**
-   * Validate and resolve file path
-   */
-  private validateAndResolvePath(inputPath: string): string {
-    if (!inputPath || typeof inputPath !== 'string') {
-      throw new ToolError(
-        'Invalid path: must be a non-empty string',
-        'filesystem'
-      );
-    }
-
-    // Resolve the path to handle relative paths and symlinks
-    const resolvedPath = path.resolve(inputPath);
-
-    // Check if path is within allowed directories
-    const isAllowed = this.fsConfig.allowedPaths.some((allowedPath) => {
-      const normalizedAllowed = path.resolve(allowedPath);
-      return resolvedPath.startsWith(normalizedAllowed);
-    });
-
-    if (!isAllowed) {
-      throw new ToolError(
-        `Path not allowed: ${resolvedPath}. Allowed paths: ${this.fsConfig.allowedPaths.join(', ')}`,
-        'filesystem'
-      );
-    }
-
-    // Check forbidden paths
-    if (this.fsConfig.forbiddenPaths) {
-      const isForbidden = this.fsConfig.forbiddenPaths.some((forbiddenPath) => {
-        const normalizedForbidden = path.resolve(forbiddenPath);
-        return resolvedPath.startsWith(normalizedForbidden);
-      });
-
-      if (isForbidden) {
-        throw new ToolError(
-          `Access to path forbidden: ${resolvedPath}`,
-          'filesystem'
-        );
-      }
-    }
-
-    return resolvedPath;
-  }
-
-  /**
-   * List directory contents recursively
-   */
-  private async listDirectoryRecursive(
-    dirPath: string,
-    recursive: boolean,
-    showHidden: boolean
-  ): Promise<any[]> {
-    const entries: any[] = [];
-
-    const dirents = await fs.readdir(dirPath, { withFileTypes: true });
-
-    for (const dirent of dirents) {
-      // Skip hidden files if not requested
-      if (!showHidden && dirent.name.startsWith('.')) {
-        continue;
-      }
-
-      const fullPath = path.join(dirPath, dirent.name);
-      const relativePath = path.relative(process.cwd(), fullPath);
-
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        const stats = await fs.stat(fullPath);
-
-        const entry = {
-          name: dirent.name,
-          path: relativePath,
-          fullPath,
-          type: dirent.isDirectory() ? 'directory' : 'file',
-          size: stats.size,
-          modified: stats.mtime.toISOString(),
-          permissions: stats.mode,
-        };
-
-        entries.push(entry);
-
-        // Recurse into subdirectories if requested
-        if (recursive && dirent.isDirectory()) {
-          const subEntries = await this.listDirectoryRecursive(
-            fullPath,
-            true,
-            showHidden
-          );
-          entries.push(...subEntries);
+        if (attempt > 0) {
+          this.logger.debug(`Retry attempt ${attempt}/${maxRetries}`, {
+            path: params['path'],
+          });
+          await this.delay(retryDelay * attempt); // Exponential backoff
         }
+
+        return await this._readFileOnce(params, enableMetrics);
       } catch (error) {
-        // Log error but continue with other entries
-        this.logger.warn('Failed to get stats for entry', {
-          path: fullPath,
-          error: error instanceof Error ? error.message : String(error),
+        lastError = error as Error;
+
+        // Don't retry on validation errors
+        if (this.isValidationError(error)) {
+          throw error;
+        }
+
+        // Don't retry on file not found
+        if (this.isFileNotFoundError(error)) {
+          throw error;
+        }
+
+        // Don't retry on permission errors
+        if (this.isPermissionError(error)) {
+          throw error;
+        }
+
+        // Only retry on transient errors
+        if (attempt === maxRetries) {
+          this.logger.error('All retry attempts exhausted', {
+            path: params['path'],
+            attempts: attempt + 1,
+            error: lastError,
+          });
+          throw lastError;
+        }
+
+        this.logger.warn('Transient error, will retry', {
+          path: params['path'],
+          attempt: attempt + 1,
+          maxRetries,
+          error: lastError.message,
         });
       }
     }
 
-    return entries;
+    throw lastError!;
+  }
+
+  /**
+   * Single attempt to read file
+   */
+  private async _readFileOnce(
+    params: Record<string, any>,
+    enableMetrics: boolean
+  ): Promise<ToolResult> {
+    const startTime = enableMetrics ? performance.now() : 0;
+    const operationId = enableMetrics
+      ? `read_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
+      : undefined;
+
+    try {
+      // Extract sessionId from tool execution context
+      // Injected by ToolRegistry during tool execution
+      const sessionId = params['_sessionId'];
+      if (!sessionId) {
+        throw new AcpFileSystemError(
+          'Session ID is required for ACP file operations. ' +
+            'This is an internal error - please report it.',
+          -32602,
+          { context: 'missing_session_id' }
+        );
+      }
+
+      // Validate path parameter
+      const path = params['path'];
+      if (!path || typeof path !== 'string') {
+        throw new AcpFileSystemError(
+          'Valid file path is required. Path must be a non-empty string.',
+          -32602,
+          { context: 'invalid_path', provided: path }
+        );
+      }
+
+      // Optional line parameter (1-based)
+      const line = params['line'];
+      if (line !== undefined && (typeof line !== 'number' || line < 1)) {
+        throw new AcpFileSystemError(
+          'Line number must be a positive integer (1-based)',
+          -32602,
+          { context: 'invalid_line', provided: line }
+        );
+      }
+
+      // Optional limit parameter
+      const limit = params['limit'];
+      if (limit !== undefined && (typeof limit !== 'number' || limit < 1)) {
+        throw new AcpFileSystemError(
+          'Limit must be a positive integer',
+          -32602,
+          { context: 'invalid_limit', provided: limit }
+        );
+      }
+
+      if (enableMetrics) {
+        this.logger.debug('Starting fs/read_text_file operation', {
+          operationId,
+          path,
+          sessionId,
+          hasRange: line !== undefined || limit !== undefined,
+        });
+      } else {
+        this.logger.debug('Reading file via ACP client method', {
+          sessionId,
+          path,
+          line,
+          limit,
+        });
+      }
+
+      // Call ACP client method
+      // Per ACP spec: This accesses the client's file system, including unsaved changes
+      const content = await this.fileSystemClient.readTextFile({
+        sessionId,
+        path,
+        line,
+        limit,
+      });
+
+      const lineCount = content.split('\n').length;
+
+      if (enableMetrics) {
+        const duration = performance.now() - startTime;
+        this.recordMetric('fs.read_text_file.success', duration, {
+          path,
+          contentLength: content.length,
+          hasRange: line !== undefined || limit !== undefined,
+        });
+
+        this.logger.info('File read successfully via ACP', {
+          operationId,
+          duration: `${duration.toFixed(2)}ms`,
+          path,
+          contentLength: content.length,
+          lineCount,
+        });
+      } else {
+        this.logger.info('File read successfully via ACP', {
+          path,
+          contentLength: content.length,
+          lineCount,
+          partial: line !== undefined || limit !== undefined,
+        });
+      }
+
+      // Per ACP spec: Return clean response with custom metadata in _meta
+      return {
+        success: true,
+        result: {
+          path,
+          content,
+          // Per ACP extensibility guidelines: Use _meta for implementation-specific fields
+          _meta: {
+            contentLength: content.length,
+            lineCount,
+            ...(line !== undefined && { startLine: line }),
+            ...(limit !== undefined && { maxLines: limit }),
+            source: 'acp-client',
+            includesUnsavedChanges: true,
+            acpMethod: 'fs/read_text_file',
+            sessionId,
+            ...(operationId ? { operationId } : {}),
+          },
+        },
+      };
+    } catch (error) {
+      if (enableMetrics) {
+        const duration = performance.now() - startTime;
+        this.recordMetric('fs.read_text_file.error', duration, {
+          path: params['path'],
+          errorType: error instanceof Error ? error.name : 'unknown',
+        });
+      }
+
+      this.logger.error('Failed to read file via ACP', {
+        error,
+        path: params['path'],
+      });
+
+      return {
+        success: false,
+        error:
+          error instanceof Error
+            ? this.enhanceFileSystemError(error, 'read', params['path']).message
+            : String(error),
+      };
+    }
+  }
+
+  /**
+   * Write file contents via ACP client method with retry logic
+   *
+   * Per ACP spec: Calls fs/write_text_file on the client
+   */
+  private async writeFile(params: Record<string, any>): Promise<ToolResult> {
+    const maxRetries = this.fsConfig.retries ?? 3;
+    const retryDelay = this.fsConfig.retryDelay ?? 1000;
+    const enableMetrics = this.fsConfig.enableMetrics ?? false;
+
+    let lastError: Error | undefined;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        if (attempt > 0) {
+          this.logger.debug(`Retry attempt ${attempt}/${maxRetries}`, {
+            path: params['path'],
+          });
+          await this.delay(retryDelay * attempt);
+        }
+
+        return await this._writeFileOnce(params, enableMetrics);
+      } catch (error) {
+        lastError = error as Error;
+
+        // Don't retry on validation errors
+        if (this.isValidationError(error)) {
+          throw error;
+        }
+
+        // Don't retry on permission errors
+        if (this.isPermissionError(error)) {
+          throw error;
+        }
+
+        if (attempt === maxRetries) {
+          this.logger.error('All retry attempts exhausted', {
+            path: params['path'],
+            attempts: attempt + 1,
+            error: lastError,
+          });
+          throw lastError;
+        }
+
+        this.logger.warn('Transient error, will retry', {
+          path: params['path'],
+          attempt: attempt + 1,
+          maxRetries,
+          error: lastError.message,
+        });
+      }
+    }
+
+    throw lastError!;
+  }
+
+  /**
+   * Single attempt to write file
+   */
+  private async _writeFileOnce(
+    params: Record<string, any>,
+    enableMetrics: boolean
+  ): Promise<ToolResult> {
+    const startTime = enableMetrics ? performance.now() : 0;
+    const operationId = enableMetrics
+      ? `write_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
+      : undefined;
+
+    try {
+      // Extract sessionId from tool execution context
+      const sessionId = params['_sessionId'];
+      if (!sessionId) {
+        throw new AcpFileSystemError(
+          'Session ID is required for ACP file operations. ' +
+            'This is an internal error - please report it.',
+          -32602,
+          { context: 'missing_session_id' }
+        );
+      }
+
+      // Validate path parameter
+      const path = params['path'];
+      if (!path || typeof path !== 'string') {
+        throw new AcpFileSystemError(
+          'Valid file path is required. Path must be a non-empty string.',
+          -32602,
+          { context: 'invalid_path', provided: path }
+        );
+      }
+
+      // Validate content parameter
+      const content = params['content'];
+      if (content === undefined || content === null) {
+        throw new AcpFileSystemError(
+          'Content is required. To create an empty file, pass an empty string.',
+          -32602,
+          { context: 'missing_content' }
+        );
+      }
+
+      // Convert content to string if needed
+      const contentStr =
+        typeof content === 'string' ? content : String(content);
+
+      if (enableMetrics) {
+        this.logger.debug('Starting fs/write_text_file operation', {
+          operationId,
+          path,
+          sessionId,
+          contentLength: contentStr.length,
+        });
+      } else {
+        this.logger.debug('Writing file via ACP client method', {
+          sessionId,
+          path,
+          contentLength: contentStr.length,
+        });
+      }
+
+      // Call ACP client method
+      // Per ACP spec: Client handles directory creation and permissions
+      await this.fileSystemClient.writeTextFile({
+        sessionId,
+        path,
+        content: contentStr,
+      });
+
+      if (enableMetrics) {
+        const duration = performance.now() - startTime;
+        this.recordMetric('fs.write_text_file.success', duration, {
+          path,
+          contentLength: contentStr.length,
+        });
+
+        this.logger.info('File written successfully via ACP', {
+          operationId,
+          duration: `${duration.toFixed(2)}ms`,
+          path,
+          contentLength: contentStr.length,
+        });
+      } else {
+        this.logger.info('File written successfully via ACP', {
+          path,
+          contentLength: contentStr.length,
+          lineCount: contentStr.split('\n').length,
+        });
+      }
+
+      // Per ACP spec: Return clean response with custom metadata in _meta
+      return {
+        success: true,
+        result: {
+          path,
+          written: true,
+          // Per ACP extensibility guidelines: Use _meta for implementation-specific fields
+          _meta: {
+            contentLength: contentStr.length,
+            lineCount: contentStr.split('\n').length,
+            source: 'acp-client',
+            acpMethod: 'fs/write_text_file',
+            sessionId,
+            ...(operationId ? { operationId } : {}),
+          },
+        },
+      };
+    } catch (error) {
+      if (enableMetrics) {
+        const duration = performance.now() - startTime;
+        this.recordMetric('fs.write_text_file.error', duration, {
+          path: params['path'],
+          errorType: error instanceof Error ? error.name : 'unknown',
+        });
+      }
+
+      this.logger.error('Failed to write file via ACP', {
+        error,
+        path: params['path'],
+      });
+
+      return {
+        success: false,
+        error:
+          error instanceof Error
+            ? this.enhanceFileSystemError(error, 'write', params['path'])
+                .message
+            : String(error),
+      };
+    }
+  }
+
+  // Helper methods
+
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private isValidationError(error: unknown): boolean {
+    return (
+      error instanceof AcpFileSystemError ||
+      (error instanceof Error &&
+        (error.message.includes('is required') ||
+          error.message.includes('must be') ||
+          error.message.includes('invalid')))
+    );
+  }
+
+  private isFileNotFoundError(error: unknown): boolean {
+    return (
+      error instanceof Error &&
+      (error.message.includes('not found') ||
+        error.message.includes('does not exist') ||
+        error.message.includes('ENOENT'))
+    );
+  }
+
+  private isPermissionError(error: unknown): boolean {
+    return (
+      error instanceof Error &&
+      (error.message.includes('permission denied') ||
+        error.message.includes('access denied') ||
+        error.message.includes('EACCES') ||
+        error.message.includes('EPERM'))
+    );
+  }
+
+  private enhanceFileSystemError(
+    error: Error,
+    operation: string,
+    path: string
+  ): Error {
+    // Add more context to the error
+    const enhanced = new Error(
+      `File system ${operation} operation failed for '${path}': ${error.message}`
+    );
+    enhanced.name = error.name;
+    if (error.stack) {
+      enhanced.stack = error.stack;
+    }
+    return enhanced;
+  }
+
+  private recordMetric(
+    name: string,
+    duration: number,
+    metadata: Record<string, any>
+  ): void {
+    // Log metrics for monitoring integration
+    this.logger.debug('Metric recorded', {
+      metric: name,
+      duration: `${duration.toFixed(2)}ms`,
+      ...metadata,
+    });
+
+    // Future: Could integrate with metrics collector (Prometheus, StatsD, etc.)
+    // this.metricsCollector?.record(name, duration, metadata);
   }
 }

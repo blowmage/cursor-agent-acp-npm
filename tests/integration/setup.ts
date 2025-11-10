@@ -7,6 +7,13 @@
 
 import { jest } from '@jest/globals';
 
+// Mock the @agentclientprotocol/sdk ES module before any imports
+jest.mock('@agentclientprotocol/sdk', () => ({
+  AgentSideConnection: jest.fn(),
+  ndJsonStream: jest.fn(),
+  // Add other exports as needed
+}));
+
 // Mock console methods to reduce noise during integration tests
 const originalConsole = global.console;
 global.console = {

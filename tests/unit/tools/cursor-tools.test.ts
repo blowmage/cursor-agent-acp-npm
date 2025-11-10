@@ -30,7 +30,6 @@ describe('CursorToolsProvider', () => {
       tools: {
         filesystem: {
           enabled: true,
-          allowedPaths: ['/tmp', '/var/tmp'],
         },
         terminal: {
           enabled: true,

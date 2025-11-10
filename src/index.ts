@@ -62,7 +62,6 @@ export const DEFAULT_CONFIG: AdapterConfig = {
   tools: {
     filesystem: {
       enabled: true,
-      allowedPaths: ['./'],
     },
     terminal: {
       enabled: true,

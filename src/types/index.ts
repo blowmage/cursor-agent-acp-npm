@@ -249,7 +249,6 @@ export interface AdapterConfig {
   tools: {
     filesystem: {
       enabled: boolean;
-      allowedPaths: string[];
     };
     terminal: {
       enabled: boolean;
@@ -266,6 +265,20 @@ export interface AdapterConfig {
   cursor: {
     timeout: number;
     retries: number;
+  };
+  http?: {
+    /** Enable SDK-based HTTP transport (default: true) */
+    useSDK?: boolean;
+    /** Enable connection pooling for high throughput (default: true) */
+    enablePooling?: boolean;
+    /** Maximum number of concurrent HTTP connections (default: 100) */
+    maxConnections?: number;
+    /** Maximum time a connection can be idle before cleanup in ms (default: 60000) */
+    maxIdleTime?: number;
+    /** Maximum time to wait for an available connection in ms (default: 5000) */
+    acquireTimeout?: number;
+    /** Enable connection pool metrics collection (default: true) */
+    enableMetrics?: boolean;
   };
 }
 

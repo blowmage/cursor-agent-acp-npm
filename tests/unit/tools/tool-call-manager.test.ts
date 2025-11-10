@@ -568,7 +568,7 @@ describe('ToolCallManager', () => {
         toolCallId,
         sessionId: 'session1',
         toolName: 'test',
-        status: 'in_progress', // Phase 3: Default changed to in_progress
+        status: 'in_progress',
       });
       expect(info?.startTime).toBeInstanceOf(Date);
     });

@@ -64,8 +64,7 @@ describe('Prompt Turn Integration Tests', () => {
       sessionTimeout: 3600000,
       tools: {
         filesystem: {
-          enabled: true,
-          allowedPaths: ['/tmp'],
+          enabled: false, // Disabled for integration tests - not testing filesystem
         },
         terminal: {
           enabled: true,
@@ -587,7 +586,7 @@ describe('Prompt Turn Integration Tests', () => {
       });
     }, 10000);
 
-    it('should echo user messages via user_message_chunk (Phase 2)', async () => {
+    it('should echo user messages via user_message_chunk', async () => {
       await adapter.processRequest({
         jsonrpc: '2.0',
         method: 'session/prompt',
@@ -624,7 +623,7 @@ describe('Prompt Turn Integration Tests', () => {
       expect(userChunks[1].params?.update?.content.annotations).toBeDefined();
     }, 10000);
 
-    it('should include content metrics in response (Phase 2)', async () => {
+    it('should include content metrics in response', async () => {
       const response = await adapter.processRequest({
         jsonrpc: '2.0',
         method: 'session/prompt',
@@ -648,7 +647,7 @@ describe('Prompt Turn Integration Tests', () => {
       );
     }, 10000);
 
-    it('should annotate agent message chunks (Phase 3)', async () => {
+    it('should annotate agent message chunks', async () => {
       await adapter.processRequest({
         jsonrpc: '2.0',
         method: 'session/prompt',
@@ -677,7 +676,7 @@ describe('Prompt Turn Integration Tests', () => {
       expect(firstChunk.annotations?.lastModified).toBeDefined();
     }, 10000);
 
-    it('should annotate content with correct categories (Phase 3)', async () => {
+    it('should annotate content with correct categories', async () => {
       // Clear notifications for this test
       notifications = [];
 
@@ -1169,9 +1168,9 @@ describe('Prompt Turn Integration Tests', () => {
       // Per ACP spec: Cursor errors result in stopReason='refusal', not failure
       expect(response.result?.stopReason).toBe('refusal');
 
-      // Should have _meta with error details
+      // Should have _meta with error details and specific subtype
       expect(response.result?._meta?.stopReasonDetails).toBeDefined();
-      expect(response.result?._meta?.stopReasonDetails?.reason).toBe('refusal');
+      expect(response.result?._meta?.stopReasonDetails?.reason).toBe('error'); // Specific subtype, not generic 'refusal'
 
       // Should have processing time in metadata
       expect(

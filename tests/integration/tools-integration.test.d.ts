@@ -1,5 +1,5 @@
 /**
- * Integration tests for Phase 4 Tool Calling System
+ * Integration tests for Tool Calling System
  *
  * These tests verify the complete integration of filesystem, terminal, and
  * cursor-specific tools working together through the ToolRegistry.
