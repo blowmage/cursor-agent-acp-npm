@@ -1168,9 +1168,9 @@ describe('Prompt Turn Integration Tests', () => {
       // Per ACP spec: Cursor errors result in stopReason='refusal', not failure
       expect(response.result?.stopReason).toBe('refusal');
 
-      // Should have _meta with error details
+      // Should have _meta with error details and specific subtype
       expect(response.result?._meta?.stopReasonDetails).toBeDefined();
-      expect(response.result?._meta?.stopReasonDetails?.reason).toBe('refusal');
+      expect(response.result?._meta?.stopReasonDetails?.reason).toBe('error'); // Specific subtype, not generic 'refusal'
 
       // Should have processing time in metadata
       expect(

@@ -73,6 +73,7 @@
     "winston": "^3.11.0"
   },
   "devDependencies": {
+    "@jest/test-sequencer": "^29.7.0",
     "@types/jest": "^29.5.8",
     "@types/node": "^20.8.10",
     "@types/uuid": "^9.0.7",

@@ -257,11 +257,41 @@ export class PromptHandler {
 
     // Explicit refusal or error occurred
     if (error || responseMetadata?.['refused'] || responseMetadata?.['error']) {
+      // Determine specific refusal subtype for better client handling
+      let reason: string;
+      if (error) {
+        // Categorize errors by type
+        if (
+          error.name === 'AuthenticationError' ||
+          error.message.includes('authentication')
+        ) {
+          reason = 'authentication';
+        } else if (
+          error.name === 'RateLimitError' ||
+          error.message.includes('rate limit')
+        ) {
+          reason = 'rate_limit';
+        } else if (
+          error.name === 'TimeoutError' ||
+          error.message.includes('timeout')
+        ) {
+          reason = 'timeout';
+        } else {
+          reason = 'error'; // Generic system error
+        }
+      } else if (responseMetadata?.['safeguardTriggered']) {
+        reason = 'content_policy'; // Content safety filter
+      } else if (responseMetadata?.['capabilityUnavailable']) {
+        reason = 'capability_limit'; // Required capability not available
+      } else {
+        reason = 'refused'; // Generic refusal
+      }
+
       return {
         stopReason: STOP_REASON.REFUSAL,
         stopReasonDetails: {
-          reason: 'refusal', // Standard reason field matching stopReason
-          refusalType: error ? 'error' : 'refused',
+          reason, // Specific refusal subtype (error, content_policy, capability_limit, refused, etc.)
+          refusalType: error ? 'error' : 'refused', // Keep for backward compatibility
           ...(error && {
             errorName: error.name,
             errorMessage: error.message,
