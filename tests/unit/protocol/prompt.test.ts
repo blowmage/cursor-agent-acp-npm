@@ -2,8 +2,6 @@
  * Unit tests for PromptHandler
  */
 
-/* eslint-disable @typescript-eslint/no-unused-vars, no-unused-vars, no-duplicate-imports */
-
 import { PromptHandler } from '../../../src/protocol/prompt';
 import { ContentProcessor } from '../../../src/protocol/content';
 import type {

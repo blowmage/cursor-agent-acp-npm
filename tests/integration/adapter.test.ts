@@ -757,11 +757,12 @@ describe('CursorAgentAdapter Integration', () => {
         expect(response.result.tools).toBeInstanceOf(Array);
         expect(response.result.tools.length).toBeGreaterThan(0);
 
-        // Check for expected tools
+        // Check for expected tools (terminals are client-side capabilities, not tools)
         const toolNames = response.result.tools.map((tool: any) => tool.name);
         expect(toolNames).toContain('read_file');
         expect(toolNames).toContain('write_file');
-        expect(toolNames).toContain('execute_command');
+        // Terminal operations are client-side capabilities per ACP spec
+        expect(toolNames).not.toContain('execute_command');
       });
 
       it('should execute filesystem tool', async () => {
@@ -786,7 +787,8 @@ describe('CursorAgentAdapter Integration', () => {
         expect(response.result.result.path).toBe('/tmp/test-file.txt');
       });
 
-      it('should execute terminal tool', async () => {
+      it('should reject terminal tool calls (terminals are client-side)', async () => {
+        // Terminal operations are not tools per ACP spec
         const request: AcpRequest = {
           jsonrpc: '2.0',
           method: 'tools/call',
@@ -802,9 +804,15 @@ describe('CursorAgentAdapter Integration', () => {
 
         const response = await adapter.processRequest(request);
 
-        expect(response.result).toBeDefined();
-        expect(response.result.success).toBe(true);
-        expect(response.result.result.stdout).toContain('hello world');
+        // The response structure differs based on whether it's an error or result
+        if (response.result) {
+          expect(response.result.success).toBe(false);
+          expect(response.result.error).toContain('Tool not found');
+        } else if (response.error) {
+          expect(response.error.message).toContain('Tool not found');
+        } else {
+          fail('Expected either result or error in response');
+        }
       });
 
       it('should reject calls to non-existent tools', async () => {

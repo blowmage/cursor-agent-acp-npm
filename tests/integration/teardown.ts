@@ -7,16 +7,11 @@
 
 export default async (): Promise<void> => {
   // Give adequate time for all child processes to terminate
-  await new Promise((resolve) => setTimeout(resolve, 500));
+  // Reduced delay since forceExit will handle remaining handles
+  await new Promise((resolve) => setTimeout(resolve, 100));
 
   // Clear any lingering timers
   if (global.gc) {
     global.gc();
-  }
-
-  // Force cleanup of any remaining handles
-  if (process.env.NODE_ENV === 'test') {
-    // Give another small delay to allow cleanup
-    await new Promise((resolve) => setTimeout(resolve, 200));
   }
 };

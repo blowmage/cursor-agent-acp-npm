@@ -11,7 +11,7 @@ module.exports = {
 
   // Transform ES modules from node_modules that Jest can't handle
   transformIgnorePatterns: [
-    'node_modules/(?!(@agentclientprotocol|zod)/)',
+    'node_modules/(?!(@agentclientprotocol|zod|uuid)/)',
   ],
 
   setupFiles: ['<rootDir>/tests/integration/env.ts'],
@@ -21,6 +21,7 @@ module.exports = {
 
   transform: {
     '^.+\\.tsx?$': ['ts-jest', { tsconfig: 'tsconfig.json' }],
+    '^.+\\.m?js$': ['ts-jest', { tsconfig: { module: 'commonjs' } }],
   },
 
   testTimeout: 10000,
@@ -29,5 +30,6 @@ module.exports = {
   restoreMocks: true,
   errorOnDeprecated: true,
   detectOpenHandles: true,
+  forceExit: true,
   verbose: true,
 };

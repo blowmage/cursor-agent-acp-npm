@@ -56,7 +56,7 @@ function getPackageVersion(): string {
     const packagePath = join(__dirname, '../../package.json');
     const pkg = JSON.parse(readFileSync(packagePath, 'utf-8'));
     return pkg.version || '0.2.0';
-  } catch (error) {
+  } catch {
     // Fallback version if package.json cannot be read
     return '0.2.0';
   }

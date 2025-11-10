@@ -6,7 +6,7 @@
  * and project management functionality.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-/* eslint-disable @typescript-eslint/no-unused-vars, no-unused-vars, no-duplicate-imports */
+ 
 const cursor_tools_1 = require("../../../src/tools/cursor-tools");
 // Mock the CursorCliBridge
 jest.mock('../../../src/cursor/cli-bridge');

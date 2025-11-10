@@ -128,8 +128,11 @@ cursor-agent-acp --session-dir ~/.cursor-sessions
     "terminal": {
       "enabled": true,
       "maxProcesses": 5,
+      "defaultOutputByteLimit": 10485760,
+      "maxOutputByteLimit": 52428800,
       "forbiddenCommands": ["rm", "sudo", "su"],
-      "allowedCommands": ["echo", "ls", "cat", "grep", "find"]
+      "allowedCommands": [],
+      "defaultCwd": "./"
     },
     "cursor": {
       "enabled": true,

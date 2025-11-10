@@ -28,6 +28,17 @@ global.console = {
   debug: jest.fn(),
 };
 
+// Mock process.stdout.write to suppress JSON-RPC messages during tests
+// JSON-RPC messages are written to stdout per ACP protocol spec
+const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+process.stdout.write = jest.fn((chunk: any, encoding?: any, cb?: any) => {
+  // Silently suppress stdout writes during tests (JSON-RPC messages)
+  if (typeof cb === 'function') {
+    cb();
+  }
+  return true;
+}) as typeof process.stdout.write;
+
 // Mock process.exit to prevent tests from actually exiting
 const mockExit = jest.fn();
 Object.defineProperty(process, 'exit', {
@@ -42,9 +53,7 @@ process.env.CURSOR_AGENT_ACP_SESSION_DIR = '/tmp/test-sessions';
 
 // Global test helpers
 declare global {
-  // eslint-disable-next-line no-unused-vars
   namespace jest {
-    // eslint-disable-next-line no-unused-vars
     interface Matchers<R> {
       toBeValidSessionId(): R;
       toBeValidAcpResponse(): R;
@@ -153,6 +162,8 @@ afterEach(() => {
 afterAll(() => {
   // Restore original console
   global.console = originalConsole;
+  // Restore original stdout.write
+  process.stdout.write = originalStdoutWrite;
 });
 
 // Helper functions for tests

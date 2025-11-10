@@ -5,15 +5,33 @@
  * and project management functionality.
  */
 
-/* eslint-disable @typescript-eslint/no-unused-vars, no-unused-vars, no-duplicate-imports */
-
 import { CursorToolsProvider } from '../../../src/tools/cursor-tools';
 import { CursorCliBridge } from '../../../src/cursor/cli-bridge';
 import type { AdapterConfig, Logger } from '../../../src/types';
 import { ToolError } from '../../../src/types';
 
-// Mock the CursorCliBridge
-jest.mock('../../../src/cursor/cli-bridge');
+// Mock the CursorCliBridge to prevent real cursor-agent calls
+jest.mock('../../../src/cursor/cli-bridge', () => {
+  return {
+    CursorCliBridge: jest.fn().mockImplementation(() => {
+      return {
+        executeCommand: jest.fn(),
+        sendPrompt: jest.fn(),
+        sendStreamingPrompt: jest.fn(),
+        checkConnectivity: jest.fn(),
+        authenticate: jest.fn(),
+        getAuthStatus: jest.fn(),
+        checkAuthentication: jest.fn(),
+        getVersion: jest.fn(),
+        startInteractiveSession: jest.fn(),
+        sendSessionInput: jest.fn(),
+        closeSession: jest.fn(),
+        getActiveSessions: jest.fn(),
+        close: jest.fn(),
+      };
+    }),
+  };
+});
 
 describe('CursorToolsProvider', () => {
   let provider: CursorToolsProvider;

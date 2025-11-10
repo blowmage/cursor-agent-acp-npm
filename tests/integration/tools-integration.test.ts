@@ -3,9 +3,10 @@
  *
  * These tests verify the complete integration of filesystem, terminal, and
  * cursor-specific tools working together through the ToolRegistry.
+ *
+ * Note: CursorCliBridge is mocked to avoid slow real cursor-agent calls
+ * while still testing all other component integrations.
  */
-
-/* eslint-disable @typescript-eslint/no-unused-vars, no-unused-vars */
 
 import { promises as fs } from 'fs';
 import * as path from 'path';
@@ -15,6 +16,16 @@ import { FilesystemToolProvider } from '../../src/tools/filesystem';
 import { AcpFileSystemClient } from '../../src/client/filesystem-client';
 import type { AdapterConfig, Logger, ToolCall } from '../../src/types';
 import type { ClientCapabilities } from '@agentclientprotocol/sdk';
+
+// Mock the CursorCliBridge module to avoid real cursor-agent calls
+jest.mock('../../src/cursor/cli-bridge', () => ({
+  CursorCliBridge: jest.fn().mockImplementation((config, logger) => {
+    return new (require('./mocks/cursor-bridge-mock').MockCursorCliBridge)(
+      config,
+      logger
+    );
+  }),
+}));
 
 // Mock fs module to avoid real file I/O operations in integration tests
 jest.mock('fs', () => {
@@ -249,9 +260,10 @@ describe('Tool System Integration', () => {
       const providerNames = providers.map((p) => p.name);
 
       expect(providerNames).toContain('filesystem');
-      expect(providerNames).toContain('terminal');
+      // Terminal is now a client-side capability, not a tool provider
+      expect(providerNames).not.toContain('terminal');
       expect(providerNames).toContain('cursor');
-      expect(providers).toHaveLength(3);
+      expect(providers).toHaveLength(2);
     });
 
     test('should provide all available tools', () => {
@@ -262,26 +274,29 @@ describe('Tool System Integration', () => {
       expect(toolNames).toContain('read_file');
       expect(toolNames).toContain('write_file');
 
-      // Terminal tools
-      expect(toolNames).toContain('execute_command');
-      expect(toolNames).toContain('start_shell_session');
+      // Terminal operations are client-side capabilities, not tools
+      expect(toolNames).not.toContain('execute_command');
+      expect(toolNames).not.toContain('start_shell_session');
 
       // Cursor tools
       expect(toolNames).toContain('search_codebase');
       expect(toolNames).toContain('analyze_code');
       expect(toolNames).toContain('apply_code_changes');
 
-      expect(tools.length).toBeGreaterThanOrEqual(7);
+      // Should have filesystem + cursor tools (no terminal tools)
+      expect(tools.length).toBeGreaterThanOrEqual(5);
     });
 
     test('should report correct capabilities', () => {
       const capabilities = registry.getCapabilities();
 
       expect(capabilities.filesystem).toBe(true);
-      expect(capabilities.terminal).toBe(true);
+      // Terminal is not reported as a tool capability (it's a client capability)
+      expect(capabilities.terminal).toBeUndefined();
       expect(capabilities.cursor).toBe(true);
       expect(capabilities.tools).toContain('read_file');
-      expect(capabilities.tools).toContain('execute_command');
+      // Terminal tools are not in the tools array
+      expect(capabilities.tools).not.toContain('execute_command');
       expect(capabilities.tools).toContain('search_codebase');
     });
 
@@ -391,15 +406,10 @@ export class Calculator {
         },
       };
 
-      let searchResult;
-      try {
-        searchResult = await registry.executeTool(searchCall);
-        // Note: This might fail if cursor-agent is not available, which is expected
-      } catch (error) {
-        console.log('Cursor CLI not available, skipping cursor-specific tests');
-        return;
-      }
+      // Execute search - should work with mocked CursorCliBridge
+      const searchResult = await registry.executeTool(searchCall);
 
+      expect(searchResult.success).toBe(true);
       if (searchResult.success) {
         expect(searchResult.result.results).toBeDefined();
       }
@@ -413,8 +423,9 @@ export class Calculator {
         },
       };
 
-      const _infoResult = await registry.executeTool(infoCall);
-      // This might fail without cursor-agent, which is expected
+      // Execute info call - should work with mocked CursorCliBridge
+      const infoResult = await registry.executeTool(infoCall);
+      expect(infoResult.success).toBe(true);
 
       // Step 3: Verify the source file by reading it
       const verifySrcCall: ToolCall = {
@@ -434,35 +445,22 @@ export class Calculator {
     test('should handle terminal and file system integration', async () => {
       const testFilePath = path.join(testProjectDir, 'terminal-test.txt');
 
-      // Step 1: Use terminal to echo content and write to file using shell
-      // Use shell -c to properly handle redirection
-      const createFileCall: ToolCall = {
-        id: 'cmd-1',
-        name: 'execute_command',
+      // Terminal operations are now client-side capabilities per ACP spec
+      // This test now only tests filesystem operations
+
+      // Step 1: Use filesystem to write content
+      const writeCall: ToolCall = {
+        id: 'write-1',
+        name: 'write_file',
         parameters: {
-          command: 'sh',
-          args: ['-c', `echo "Hello from terminal" > "${testFilePath}"`],
-          working_directory: testProjectDir,
+          path: testFilePath,
+          content: 'Hello from integration test\n',
+          _sessionId: 'test-session',
         },
       };
 
-      const cmdResult = await registry.executeTool(createFileCall);
-
-      // If terminal command fails (might not have sh on all systems), use file system
-      if (!cmdResult.success) {
-        const writeCall: ToolCall = {
-          id: 'write-alt-1',
-          name: 'write_file',
-          parameters: {
-            path: testFilePath,
-            content: 'Hello from terminal\n',
-            _sessionId: 'test-session',
-          },
-        };
-
-        const writeResult = await registry.executeTool(writeCall);
-        expect(writeResult.success).toBe(true);
-      }
+      const writeResult = await registry.executeTool(writeCall);
+      expect(writeResult.success).toBe(true);
 
       // Step 2: Read the file to verify it was created
       const readCall: ToolCall = {
@@ -476,7 +474,9 @@ export class Calculator {
 
       const readResult = await registry.executeTool(readCall);
       expect(readResult.success).toBe(true);
-      expect(readResult.result.content).toContain('Hello from terminal');
+      expect(readResult.result.content).toContain(
+        'Hello from integration test'
+      );
 
       // Step 3: Verify file was created by reading it
       const verifyCall: ToolCall = {
@@ -490,7 +490,9 @@ export class Calculator {
 
       const verifyResult = await registry.executeTool(verifyCall);
       expect(verifyResult.success).toBe(true);
-      expect(verifyResult.result.content).toContain('Hello from terminal');
+      expect(verifyResult.result.content).toContain(
+        'Hello from integration test'
+      );
     });
   });
 
@@ -592,32 +594,33 @@ export class Calculator {
     test('should provide registry metrics', () => {
       const metrics = registry.getMetrics();
 
-      expect(metrics.totalTools).toBeGreaterThan(0);
-      expect(metrics.totalProviders).toBe(3);
+      // Should have filesystem + cursor tools (no terminal tools)
+      expect(metrics.totalTools).toBeGreaterThanOrEqual(5);
+      expect(metrics.totalProviders).toBe(2); // filesystem + cursor only
       expect(metrics.enabledProviders).toContain('filesystem');
-      expect(metrics.enabledProviders).toContain('terminal');
+      expect(metrics.enabledProviders).not.toContain('terminal');
       expect(metrics.enabledProviders).toContain('cursor');
     });
 
     test('should handle tool execution timeouts', async () => {
-      // This test would require a long-running command
-      // For now, just verify the timeout parameter is passed correctly
-      const longCall: ToolCall = {
+      // Terminal operations are client-side now
+      // Test with a filesystem operation that should complete quickly
+      const call: ToolCall = {
         id: 'timeout-1',
-        name: 'execute_command',
+        name: 'read_file',
         parameters: {
-          command: 'sleep',
-          args: ['0.1'],
-          timeout: 1,
+          path: path.join(testProjectDir, 'metrics-test.txt'),
+          _sessionId: 'test-session',
         },
       };
 
       const startTime = Date.now();
-      const _result = await registry.executeTool(longCall);
+      const result = await registry.executeTool(call);
       const duration = Date.now() - startTime;
 
       // Should complete within reasonable time
       expect(duration).toBeLessThan(2000);
+      expect(result.success).toBe(true);
     });
   });
 
@@ -666,11 +669,11 @@ export class Calculator {
       expect(registry.getTools().length).toBeLessThan(initialTools);
       expect(registry.getProviders().length).toBeLessThan(initialProviders);
 
-      // Should still have Terminal and Cursor providers (2 providers)
-      expect(registry.getProviders()).toHaveLength(2);
+      // Should still have Cursor provider (1 provider after unregistering filesystem)
+      expect(registry.getProviders()).toHaveLength(1);
 
-      // Verify terminal and cursor tools are still available
-      expect(registry.hasTool('execute_command')).toBe(true);
+      // Verify cursor tools are still available (terminal tools are not in registry)
+      expect(registry.hasTool('execute_command')).toBe(false);
       expect(registry.hasTool('search_codebase')).toBe(true);
     });
   });

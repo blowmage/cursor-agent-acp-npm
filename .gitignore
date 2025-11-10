@@ -144,3 +144,6 @@ cursor-agent-acp.exe
 
 # TypeScript cache
 *.tsbuildinfo
+
+# AI work
+ai-work/

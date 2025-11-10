@@ -105,7 +105,7 @@ export class CursorCliBridge {
           result.plan = plan;
         }
         return result;
-      } catch (parseError) {
+      } catch {
         // If parsing fails, assume authenticated if command succeeded
         return {
           authenticated: true,
