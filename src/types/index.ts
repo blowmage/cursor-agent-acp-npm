@@ -253,6 +253,11 @@ export interface AdapterConfig {
     terminal: {
       enabled: boolean;
       maxProcesses: number;
+      defaultOutputByteLimit?: number;
+      maxOutputByteLimit?: number;
+      forbiddenCommands?: string[];
+      allowedCommands?: string[];
+      defaultCwd?: string;
     };
     cursor?: {
       enabled?: boolean;

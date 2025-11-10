@@ -2,8 +2,7 @@
  * ToolRegistry - Manages available tools and capabilities
  *
  * This class provides a registry for all available tools that can be
- * called through the ACP protocol, including filesystem, terminal, and
- * cursor-specific tools.
+ * called through the ACP protocol, including filesystem and cursor-specific tools.
  */
 
 import type { ToolKind, ToolCallLocation } from '@agentclientprotocol/sdk';
@@ -16,7 +15,6 @@ import {
   type ToolCall,
   type ToolResult,
 } from '../types';
-import { TerminalToolProvider } from './terminal';
 import { CursorToolsProvider } from './cursor-tools';
 import type { ToolCallManager } from './tool-call-manager';
 
@@ -355,12 +353,6 @@ export class ToolRegistry {
       move_file: 'move',
       copy_file: 'read',
 
-      // Terminal tools
-      execute_command: 'execute',
-      start_shell_session: 'execute',
-      send_to_shell: 'execute',
-      kill_shell_session: 'execute',
-
       // Cursor tools
       search_codebase: 'search',
       analyze_code: 'read',
@@ -388,8 +380,6 @@ export class ToolRegistry {
         return `Writing file: ${parameters['path'] || 'unknown'}`;
       case 'move_file':
         return `Moving file: ${parameters['source'] || 'unknown'} → ${parameters['destination'] || 'unknown'}`;
-      case 'execute_command':
-        return `Executing: ${parameters['command'] || 'unknown command'}`;
       case 'search_codebase':
         return `Searching codebase: ${parameters['query'] || 'unknown'}`;
       case 'analyze_code':
@@ -419,8 +409,6 @@ export class ToolRegistry {
     // Add capability flags based on available tools
     capabilities['filesystem'] =
       this.hasTool('read_file') || this.hasTool('write_file');
-    capabilities['terminal'] =
-      this.hasTool('execute_command') || this.hasTool('start_shell_session');
     capabilities['cursor'] =
       this.hasTool('search_codebase') || this.hasTool('analyze_code');
 
@@ -452,14 +440,10 @@ export class ToolRegistry {
       }
     }
 
-    // Check if terminal tools are configured correctly
+    // Check if terminal configuration is valid (terminals are client-side, not tools)
     if (this.config.tools.terminal.enabled) {
-      if (!this.hasTool('execute_command')) {
-        errors.push('Terminal tools enabled but not properly registered');
-      }
-
       if (this.config.tools.terminal.maxProcesses <= 0) {
-        errors.push('Terminal tools enabled but maxProcesses is invalid');
+        errors.push('Terminal enabled but maxProcesses is invalid');
       }
     }
 
@@ -510,14 +494,10 @@ export class ToolRegistry {
     // connection setup via registerProvider().
     // See: src/adapter/cursor-agent-adapter.ts
 
-    // Initialize terminal tools
-    if (this.config.tools.terminal.enabled) {
-      const terminalProvider = new TerminalToolProvider(
-        this.config,
-        this.logger
-      );
-      this.registerProvider(terminalProvider);
-    }
+    // Note: Terminal operations are NOT registered as tools
+    // Per ACP spec: Terminals are client-provided capabilities that agents
+    // request via the client connection (terminal/create, etc.), not
+    // agent-provided tools. See: TerminalManager for ACP-compliant operations.
 
     // Initialize cursor-specific tools
     if (this.config.tools.cursor?.enabled !== false) {
