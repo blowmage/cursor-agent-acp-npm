@@ -170,6 +170,11 @@ export class CursorAgentAdapter implements ClientConnection {
       };
       process.stdin.on('data', preDataListener);
 
+      // Define handlers in outer scope so they can be accessed in cancel()
+      let dataHandler: ((chunk: Buffer) => void) | null = null;
+      let endHandler: (() => void) | null = null;
+      let errorHandler: ((err: Error) => void) | null = null;
+
       const input = new ReadableStream<Uint8Array>({
         start(controller) {
           started = true;
@@ -180,30 +185,31 @@ export class CursorAgentAdapter implements ClientConnection {
             controller.enqueue(new Uint8Array(chunk));
           }
           stdinBuffer.length = 0;
-          // Define handlers so we can remove them later
-          const dataHandler = (chunk: Buffer) => {
+          // Initialize handlers (accessible from cancel via closure)
+          dataHandler = (chunk: Buffer) => {
             controller.enqueue(new Uint8Array(chunk));
           };
-          const endHandler = () => {
+          endHandler = () => {
             controller.close();
           };
-          const errorHandler = (err: Error) => {
+          errorHandler = (err: Error) => {
             controller.error(err);
           };
-          // Store handlers for cleanup
-          (controller as any)._dataHandler = dataHandler;
-          (controller as any)._endHandler = endHandler;
-          (controller as any)._errorHandler = errorHandler;
+          // Attach handlers to stdin
           process.stdin.on('data', dataHandler);
           process.stdin.on('end', endHandler);
           process.stdin.on('error', errorHandler);
         },
         cancel() {
           // Remove listeners to prevent memory leaks
-          if (started) {
-            process.stdin.removeListener('data', (this as any)._dataHandler);
-            process.stdin.removeListener('end', (this as any)._endHandler);
-            process.stdin.removeListener('error', (this as any)._errorHandler);
+          if (started && dataHandler && endHandler && errorHandler) {
+            process.stdin.removeListener('data', dataHandler);
+            process.stdin.removeListener('end', endHandler);
+            process.stdin.removeListener('error', errorHandler);
+            // Clear references to allow garbage collection
+            dataHandler = null;
+            endHandler = null;
+            errorHandler = null;
           }
         },
       });
