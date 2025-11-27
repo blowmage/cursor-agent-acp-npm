@@ -43,12 +43,15 @@ export interface SessionState {
 // ============================================================================
 // Session Modes
 // Per ACP spec: https://agentclientprotocol.com/protocol/session-modes
+//
+// NOTE: For ACP protocol types (SessionMode, SessionModeId, SessionModeState),
+// import directly from '@agentclientprotocol/sdk'. The types below are
+// internal implementation types only.
 // ============================================================================
 
-export interface SessionMode {
-  id: string;
-  name: string;
-  description: string;
+// Internal extension of SessionMode for implementation-specific behavior
+// The base SessionMode type comes from @agentclientprotocol/sdk
+export interface InternalSessionModeConfig {
   systemPrompt?: string;
   availableTools?: string[];
   permissionBehavior?: 'strict' | 'permissive' | 'auto';

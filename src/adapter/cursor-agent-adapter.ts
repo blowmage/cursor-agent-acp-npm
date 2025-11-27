@@ -25,7 +25,10 @@ import {
   type SetSessionModelRequest,
   type SetSessionModelResponse,
   type SessionModeState,
+  type SessionMode,
+  type SessionModeId,
   type SessionModelState,
+  type SessionNotification,
   type CancelNotification,
   type PromptRequest,
   type PromptResponse,
@@ -912,11 +915,11 @@ export class CursorAgentAdapter implements ClientConnection {
       throw new ProtocolError('modeId is required');
     }
 
-    // Get previous mode for tracking
-    const previousMode = this.sessionManager.getSessionMode(params.sessionId);
-
-    // Set the new mode
-    await this.sessionManager.setSessionMode(params.sessionId, params.modeId);
+    // Set the new mode (returns previous mode)
+    const previousMode = await this.sessionManager.setSessionMode(
+      params.sessionId,
+      params.modeId
+    );
 
     this.logger.info('Session mode changed', {
       sessionId: params.sessionId,
@@ -1485,22 +1488,20 @@ export class CursorAgentAdapter implements ClientConnection {
   /**
    * Builds session mode state for responses
    * Per ACP spec: Returns available modes and current mode
+   * Uses SDK SessionModeState type for ACP compliance
    */
   private buildSessionModeState(sessionId: string): SessionModeState | null {
     if (!this.sessionManager) {
       return null;
     }
 
-    const availableModes = this.sessionManager.getAvailableModes();
-    const currentMode = this.sessionManager.getSessionMode(sessionId);
+    const availableModes: SessionMode[] = this.sessionManager.getAvailableModes();
+    const currentModeId: SessionModeId = this.sessionManager.getSessionMode(sessionId);
 
+    // Per ACP spec: SessionModeState must include availableModes and currentModeId
     return {
-      availableModes: availableModes.map((mode) => ({
-        id: mode.id,
-        name: mode.name,
-        description: mode.description,
-      })),
-      currentModeId: currentMode,
+      availableModes,
+      currentModeId,
     };
   }
 
@@ -1672,18 +1673,58 @@ export class CursorAgentAdapter implements ClientConnection {
 
   /**
    * Handle setSessionMode from Agent implementation
+   * Per ACP spec: When agent changes mode, must send current_mode_update notification
    */
   async handleSetSessionModeFromAgent(
     params: SetSessionModeRequest
   ): Promise<SetSessionModeResponse | void> {
-    const response = await this.handleSetSessionMode({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'session/set_mode',
-      params,
-    } as unknown as Request);
+    if (!this.sessionManager) {
+      throw new ProtocolError('Session manager not available');
+    }
 
-    return response.result as SetSessionModeResponse;
+    // Set the mode (this validates and updates the session)
+    const previousModeId = await this.sessionManager.setSessionMode(
+      params.sessionId,
+      params.modeId
+    );
+
+    // Per ACP spec: Agent MUST send current_mode_update notification when changing mode
+    // See: https://agentclientprotocol.com/protocol/session-modes#from-the-agent
+    if (this.agentConnection) {
+      const notification: SessionNotification = {
+        sessionId: params.sessionId,
+        update: {
+          sessionUpdate: 'current_mode_update',
+          currentModeId: params.modeId,
+        },
+      };
+
+      try {
+        await this.agentConnection.sessionUpdate(notification);
+        this.logger.debug('Sent current_mode_update notification', {
+          sessionId: params.sessionId,
+          modeId: params.modeId,
+        });
+      } catch (error) {
+        this.logger.warn('Failed to send current_mode_update notification', {
+          error,
+          sessionId: params.sessionId,
+          modeId: params.modeId,
+        });
+        // Don't fail the mode change if notification fails
+      }
+    }
+
+    // Return response per ACP spec
+    const response: SetSessionModeResponse = {
+      _meta: {
+        previousMode: previousModeId,
+        newMode: params.modeId,
+        changedAt: new Date().toISOString(),
+      },
+    };
+
+    return response;
   }
 
   /**

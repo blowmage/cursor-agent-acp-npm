@@ -14,9 +14,13 @@ import {
   type SessionMetadata,
   type ConversationMessage,
   type SessionStatus,
-  type SessionMode,
+  type InternalSessionModeConfig,
   type SessionModel,
 } from '../types';
+import type {
+  SessionMode,
+  SessionModeId,
+} from '@agentclientprotocol/sdk';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface SessionListOptions {
@@ -39,28 +43,38 @@ export class SessionManager {
   private processingSessions = new Set<string>(); // Track sessions actively processing prompts
 
   // Session modes per ACP spec
+  // Using SDK SessionMode type for ACP compliance
   private readonly availableModes: SessionMode[] = [
     {
       id: 'ask',
-      name: 'Ask Mode',
-      description: 'Q&A mode for queries and information retrieval',
-      permissionBehavior: 'strict',
-    },
-    {
-      id: 'code',
-      name: 'Code Mode',
-      description: 'Agentic coding with file editing and terminal capabilities',
-      availableTools: ['filesystem', 'terminal'],
-      permissionBehavior: 'strict',
+      name: 'Ask',
+      description: 'Request permission before making any changes',
     },
     {
       id: 'architect',
-      name: 'Architect Mode',
-      description: 'High-level system design and planning',
-      availableTools: ['filesystem'],
-      permissionBehavior: 'strict',
+      name: 'Architect',
+      description: 'Design and plan software systems without implementation',
+    },
+    {
+      id: 'code',
+      name: 'Code',
+      description: 'Write and modify code with full tool access',
     },
   ];
+
+  // Internal configuration for modes (not part of ACP spec)
+  private readonly modeConfigs: Map<SessionModeId, InternalSessionModeConfig> =
+    new Map([
+      ['ask', { permissionBehavior: 'strict' }],
+      [
+        'code',
+        {
+          availableTools: ['filesystem', 'terminal'],
+          permissionBehavior: 'strict',
+        },
+      ],
+      ['architect', { availableTools: ['filesystem'], permissionBehavior: 'strict' }],
+    ]);
 
   // Available models (can be extended)
   private readonly availableModels: SessionModel[] = [
@@ -346,9 +360,18 @@ export class SessionManager {
   /**
    * Gets available session modes
    * Per ACP spec: Returns the list of modes available for sessions
+   * Returns ACP-compliant SessionMode types from SDK
    */
   getAvailableModes(): SessionMode[] {
     return this.availableModes;
+  }
+
+  /**
+   * Gets internal configuration for a mode
+   * Returns implementation-specific config (not part of ACP spec)
+   */
+  getModeConfig(modeId: SessionModeId): InternalSessionModeConfig | undefined {
+    return this.modeConfigs.get(modeId);
   }
 
   /**
@@ -361,10 +384,11 @@ export class SessionManager {
 
   /**
    * Gets the current mode for a session
+   * Per ACP spec: Returns the currentModeId
    */
-  getSessionMode(sessionId: string): string {
+  getSessionMode(sessionId: string): SessionModeId {
     const session = this.sessions.get(sessionId);
-    return session?.state.currentMode || 'ask';
+    return (session?.state.currentMode || 'ask') as SessionModeId;
   }
 
   /**
@@ -378,8 +402,14 @@ export class SessionManager {
   /**
    * Sets the mode for a session
    * Per ACP spec: Validates mode exists before setting
+   * @param sessionId - The session ID
+   * @param modeId - The mode ID (must be one of availableModes)
+   * @returns The previous mode ID
    */
-  async setSessionMode(sessionId: string, modeId: string): Promise<void> {
+  async setSessionMode(
+    sessionId: string,
+    modeId: SessionModeId
+  ): Promise<SessionModeId> {
     // Validate mode exists
     const mode = this.availableModes.find((m) => m.id === modeId);
     if (!mode) {
@@ -393,7 +423,7 @@ export class SessionManager {
     const session = await this.loadSession(sessionId);
 
     // Update mode
-    const previousMode = session.state.currentMode;
+    const previousMode = (session.state.currentMode || 'ask') as SessionModeId;
     session.state.currentMode = modeId;
     session.metadata.mode = modeId;
     session.updatedAt = new Date();
@@ -407,6 +437,8 @@ export class SessionManager {
       previousMode,
       newMode: modeId,
     });
+
+    return previousMode;
   }
 
   /**
