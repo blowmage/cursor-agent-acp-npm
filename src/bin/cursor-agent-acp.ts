@@ -45,7 +45,7 @@ const VERSION = packageInfo.version;
 program
   .name('cursor-agent-acp')
   .description('Agent Client Protocol adapter for Cursor CLI')
-  .version(VERSION);
+  .version(VERSION, '-v, --version', 'output the version number');
 
 // Auth command group
 const authCommand = program
@@ -97,7 +97,7 @@ program
     'maximum number of terminal processes',
     '5'
   )
-  .option('-v, --verbose', 'enable verbose logging')
+  .option('--verbose', 'enable verbose logging')
   .option('-q, --quiet', 'suppress all output except errors')
   .option('--validate', 'validate configuration and exit')
   .option('--test-cursor', 'test cursor-agent connectivity and exit')
