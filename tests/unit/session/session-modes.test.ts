@@ -498,7 +498,7 @@ describe('SessionManager - Session Modes', () => {
     });
 
     describe('permission behavior consistency', () => {
-      it('should all modes use strict permission behavior', () => {
+      it('all modes should use strict permission behavior', () => {
         // Arrange
         const availableModes = manager.getAvailableModes();
 
