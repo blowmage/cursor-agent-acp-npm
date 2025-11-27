@@ -1973,6 +1973,10 @@ export class CursorAgentAdapter implements ClientConnection {
       await this.sessionManager.cleanup();
     }
 
+    // Cleanup extension registry
+    if (this.extensionRegistry) {
+      this.extensionRegistry.clear();
+    }
     this.logger.debug('Cleanup completed');
   }
 
