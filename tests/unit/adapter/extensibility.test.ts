@@ -111,6 +111,61 @@ describe('CursorAgentAdapter - Extensibility', () => {
       expect(response.error?.message).toBe('Method not found');
     });
 
+    it('should return JSON-RPC error for array params', async () => {
+      const registry = adapter.getExtensionRegistry();
+      registry.registerMethod('_test/method', jest.fn());
+
+      const request = {
+        jsonrpc: '2.0',
+        id: 1,
+        method: '_test/method',
+        params: ['array', 'params'],
+      } as Request;
+
+      const response = await adapter.processRequest(request);
+
+      expect(response.error).toBeDefined();
+      expect(response.error?.code).toBe(-32602);
+      expect(response.error?.message).toContain('Invalid params');
+    });
+
+    it('should return JSON-RPC error for non-object params', async () => {
+      const registry = adapter.getExtensionRegistry();
+      registry.registerMethod('_test/method', jest.fn());
+
+      const request = {
+        jsonrpc: '2.0',
+        id: 1,
+        method: '_test/method',
+        params: 'string-params',
+      } as Request;
+
+      const response = await adapter.processRequest(request);
+
+      expect(response.error).toBeDefined();
+      expect(response.error?.code).toBe(-32602);
+      expect(response.error?.message).toContain('Invalid params');
+    });
+
+    it('should accept undefined params', async () => {
+      const registry = adapter.getExtensionRegistry();
+      const handler = jest.fn().mockResolvedValue({ ok: true });
+      registry.registerMethod('_test/method', handler);
+
+      const request = {
+        jsonrpc: '2.0',
+        id: 1,
+        method: '_test/method',
+        // params intentionally omitted
+      } as Request;
+
+      const response = await adapter.processRequest(request);
+
+      expect(response.error).toBeUndefined();
+      expect(response.result).toEqual({ ok: true });
+      expect(handler).toHaveBeenCalledWith({});
+    });
+
     it('should return JSON-RPC error for handler exceptions', async () => {
       const registry = adapter.getExtensionRegistry();
       const handler = jest

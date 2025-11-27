@@ -13,6 +13,7 @@ import type {
 } from '@agentclientprotocol/sdk';
 import type { Error as JsonRpcError } from '@agentclientprotocol/sdk';
 import { ProtocolError, type Logger, type PermissionOutcome } from '../types';
+import { validateObjectParams, createErrorResponse } from '../utils/json-rpc';
 
 export interface PermissionHandlerOptions {
   logger: Logger;
@@ -93,11 +94,16 @@ export class PermissionsHandler {
     result?: any | null;
     error?: JsonRpcError;
   }> {
-    const params = request.params as RequestPermissionRequest;
-
-    if (!params || typeof params !== 'object') {
-      throw new ProtocolError('Invalid permission request parameters');
+    // Per JSON-RPC 2.0: Validate params is an object (not array/primitive)
+    const validation = validateObjectParams(
+      request.params,
+      'session/request_permission'
+    );
+    if (!validation.valid) {
+      return createErrorResponse(request.id, validation.error);
     }
+
+    const params = validation.params as RequestPermissionRequest;
 
     if (!params.sessionId || typeof params.sessionId !== 'string') {
       throw new ProtocolError('sessionId is required and must be a string');

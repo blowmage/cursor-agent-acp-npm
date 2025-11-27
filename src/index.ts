@@ -52,6 +52,9 @@ export type {
   ExtNotificationParams,
 } from './tools/extension-registry';
 
+// JSON-RPC 2.0 utility types
+export type { ParamsValidationResult } from './utils/json-rpc';
+
 // Import the type for the default config
 import type { AdapterConfig } from './types';
 
@@ -59,6 +62,12 @@ import type { AdapterConfig } from './types';
 export { createLogger } from './utils/logger';
 export { validateConfig } from './utils/config';
 export { formatError } from './utils/error-formatter';
+export {
+  validateObjectParams,
+  createErrorResponse,
+  createSuccessResponse,
+  JsonRpcErrorCode,
+} from './utils/json-rpc';
 
 // Version information
 export const VERSION = '0.1.0';

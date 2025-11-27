@@ -51,6 +51,7 @@ import {
 } from '../types';
 import { createLogger } from '../utils/logger';
 import { validateConfig } from '../utils/config';
+import { validateObjectParams, createErrorResponse } from '../utils/json-rpc';
 import { SessionManager } from '../session/manager';
 import { CursorCliBridge } from '../cursor/cli-bridge';
 import { ToolRegistry } from '../tools/registry';
@@ -1995,37 +1996,41 @@ export class CursorAgentAdapter implements ClientConnection {
   }> {
     if (!this.extensionRegistry) {
       this.logger.warn('Extension registry not initialized');
-      return {
-        jsonrpc: '2.0',
-        id: request.id,
-        error: {
-          code: -32601,
-          message: 'Method not found',
-        },
-      };
+      return createErrorResponse(request.id, {
+        code: -32601,
+        message: 'Method not found',
+      });
     }
 
     const methodName = request.method;
-    const params = (request.params as Record<string, unknown>) || {};
+
+    // Per JSON-RPC 2.0: Validate params is an object (not array/primitive)
+    // ExtensionRegistry expects object params
+    const validation = validateObjectParams(request.params, methodName);
+    if (!validation.valid) {
+      this.logger.debug('Invalid params type for extension method', {
+        method: methodName,
+        error: validation.error,
+      });
+      return createErrorResponse(request.id, validation.error);
+    }
+
+    const paramsObj = validation.params;
 
     // Check if method is registered
     if (!this.extensionRegistry.hasMethod(methodName)) {
       this.logger.debug('Extension method not found', { method: methodName });
-      return {
-        jsonrpc: '2.0',
-        id: request.id,
-        error: {
-          code: -32601,
-          message: 'Method not found',
-        },
-      };
+      return createErrorResponse(request.id, {
+        code: -32601,
+        message: 'Method not found',
+      });
     }
 
     try {
       // Call the extension method - returns ExtMethodResponse (Record<string, unknown>)
       const result = await this.extensionRegistry.callMethod(
         methodName,
-        params
+        paramsObj
       );
 
       return {
@@ -2048,15 +2053,11 @@ export class CursorAgentAdapter implements ClientConnection {
             }
           : undefined;
 
-      return {
-        jsonrpc: '2.0',
-        id: request.id,
-        error: {
-          code: -32603,
-          message: error instanceof Error ? error.message : 'Internal error',
-          ...(errorData && { data: errorData }),
-        },
-      };
+      return createErrorResponse(request.id, {
+        code: -32603,
+        message: error instanceof Error ? error.message : 'Internal error',
+        ...(errorData && { data: errorData }),
+      });
     }
   }
 

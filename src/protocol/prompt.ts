@@ -1460,8 +1460,11 @@ export class PromptHandler {
     stream?: boolean;
     metadata?: Record<string, any>;
   } {
-    if (!params || typeof params !== 'object') {
-      throw new ProtocolError('Invalid prompt parameters');
+    // Per JSON-RPC 2.0: params must be an object (not array/primitive)
+    if (!params || typeof params !== 'object' || Array.isArray(params)) {
+      throw new ProtocolError(
+        `Invalid prompt parameters: expected object, got ${Array.isArray(params) ? 'array' : typeof params}`
+      );
     }
 
     const { sessionId, content, stream, metadata } = params;

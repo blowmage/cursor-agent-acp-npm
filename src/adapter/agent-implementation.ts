@@ -216,7 +216,10 @@ export class CursorAgentImplementation implements Agent {
       return result;
     } catch (error) {
       // If method not found, throw proper JSON-RPC error
-      if (error instanceof Error && error.message.startsWith('Extension method not found:')) {
+      if (
+        error instanceof Error &&
+        error.message.startsWith('Extension method not found:')
+      ) {
         const notFoundError = new Error('Method not found');
         (notFoundError as any).code = -32601;
         throw notFoundError;

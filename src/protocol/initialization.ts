@@ -822,7 +822,9 @@ export class InitializationHandler {
     for (const [namespace, extensions] of namespaces) {
       capabilities[namespace] = {
         ...(extensions.methods.length > 0 && { methods: extensions.methods }),
-        ...(extensions.notifications.length > 0 && { notifications: extensions.notifications }),
+        ...(extensions.notifications.length > 0 && {
+          notifications: extensions.notifications,
+        }),
       };
     }
 
