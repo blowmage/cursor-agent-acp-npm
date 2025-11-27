@@ -5,8 +5,6 @@
  * loading, updating, and cleanup of conversation sessions.
  */
 
-/* eslint-disable @typescript-eslint/no-unused-vars, no-unused-vars, no-duplicate-imports */
-
 import { SessionManager } from '../../../src/session/manager';
 import { createLogger } from '../../../src/utils/logger';
 import { DEFAULT_CONFIG } from '../../../src';

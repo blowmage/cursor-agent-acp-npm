@@ -5,8 +5,6 @@
  * protocol version validation, and error handling.
  */
 
-/* eslint-disable @typescript-eslint/no-unused-vars, no-unused-vars */
-
 import { InitializationHandler } from '../../../src/protocol/initialization';
 import { createLogger } from '../../../src/utils/logger';
 import { DEFAULT_CONFIG } from '../../../src';

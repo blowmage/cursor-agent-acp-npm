@@ -501,7 +501,7 @@ export class CursorToolsProvider implements ToolProvider {
         try {
           // Try to read existing file
           oldText = await fs.readFile(resolvedPath, 'utf-8');
-        } catch (error) {
+        } catch {
           // File doesn't exist - this is a new file
           oldText = null;
         }

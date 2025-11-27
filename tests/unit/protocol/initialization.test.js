@@ -6,7 +6,7 @@
  * protocol version validation, and error handling.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-/* eslint-disable @typescript-eslint/no-unused-vars, no-unused-vars */
+ 
 const initialization_1 = require("../../../src/protocol/initialization");
 const logger_1 = require("../../../src/utils/logger");
 const src_1 = require("../../../src");

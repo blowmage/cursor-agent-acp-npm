@@ -3,7 +3,7 @@
  * Unit tests for PromptHandler
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-/* eslint-disable @typescript-eslint/no-unused-vars, no-unused-vars, no-duplicate-imports */
+ 
 const prompt_1 = require("../../../src/protocol/prompt");
 const types_1 = require("../../../src/types");
 // Mock dependencies

@@ -2,8 +2,6 @@
  * Unit tests for ContentProcessor
  */
 
-/* eslint-disable @typescript-eslint/no-unused-vars, no-unused-vars */
-
 import { ContentProcessor } from '../../../src/protocol/content';
 import type { ContentBlock } from '@agentclientprotocol/sdk';
 import {
