@@ -952,7 +952,7 @@ export class PromptHandler {
         const text = block.text.trim();
         if (text.startsWith('/')) {
           // Extract command name (until space or end) and remaining input
-          const match = text.match(/^\/(\w+)(?:\s+(.*))?$/);
+          const match = text.match(/^\/(\S+)(?:\s+(.*))?$/);
           if (match) {
             const command = match[1]!;
             const input = match[2] || '';
