@@ -12,7 +12,7 @@
  * - Newline delimiter handling
  */
 
-import { Readable, Writable } from 'stream';
+import { Readable } from 'stream';
 
 describe('Stdio Compliance Unit Tests', () => {
   describe('Web Streams API Integration', () => {
