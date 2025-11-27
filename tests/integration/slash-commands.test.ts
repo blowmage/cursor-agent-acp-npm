@@ -16,9 +16,7 @@ import { SlashCommandsRegistry } from '../../src/tools/slash-commands';
 import type { AdapterConfig, Logger } from '../../src/types';
 import type {
   NewSessionResponse,
-  LoadSessionResponse,
   AvailableCommand,
-  SessionNotification,
 } from '@agentclientprotocol/sdk';
 
 // Mock the CursorCliBridge module
