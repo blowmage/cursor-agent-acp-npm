@@ -526,7 +526,7 @@ describe('SessionManager - Session Modes', () => {
         expect(architectTools).toBeLessThan(codeTools);
       });
 
-      it('should code mode have superset of architect tools', () => {
+      it('code mode should have superset of architect tools', () => {
         // Act
         const architectConfig = manager.getModeConfig('architect');
         const codeConfig = manager.getModeConfig('code');
