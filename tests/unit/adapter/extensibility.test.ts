@@ -9,6 +9,17 @@ import { CursorAgentAdapter } from '../../../src/adapter/cursor-agent-adapter';
 import type { AdapterConfig } from '../../../src/types';
 import type { Request } from '@agentclientprotocol/sdk';
 
+// Mock the CursorCliBridge module to prevent actual CLI calls
+jest.mock('../../../src/cursor/cli-bridge', () => ({
+  CursorCliBridge: jest.fn().mockImplementation(() => ({
+    getVersion: jest.fn().mockResolvedValue('1.0.0-mock'),
+    checkAuthentication: jest
+      .fn()
+      .mockResolvedValue({ authenticated: true, user: 'test-user' }),
+    close: jest.fn().mockResolvedValue(undefined),
+  })),
+}));
+
 describe('CursorAgentAdapter - Extensibility', () => {
   let adapter: CursorAgentAdapter;
   let mockConfig: AdapterConfig;
@@ -68,12 +79,12 @@ describe('CursorAgentAdapter - Extensibility', () => {
 
       registry.registerMethod('_test/method', handler);
 
-      const request: Request = {
+      const request = {
         jsonrpc: '2.0',
         id: 1,
         method: '_test/method',
         params: { param: 'value' },
-      };
+      } as Request;
 
       const response = await adapter.processRequest(request);
 
@@ -84,12 +95,12 @@ describe('CursorAgentAdapter - Extensibility', () => {
     });
 
     it('should return JSON-RPC error for unregistered extension method', async () => {
-      const request: Request = {
+      const request = {
         jsonrpc: '2.0',
         id: 1,
         method: '_test/nonexistent',
         params: {},
-      };
+      } as Request;
 
       const response = await adapter.processRequest(request);
 
@@ -108,12 +119,12 @@ describe('CursorAgentAdapter - Extensibility', () => {
 
       registry.registerMethod('_test/method', handler);
 
-      const request: Request = {
+      const request = {
         jsonrpc: '2.0',
         id: 1,
         method: '_test/method',
         params: {},
-      };
+      } as Request;
 
       const response = await adapter.processRequest(request);
 

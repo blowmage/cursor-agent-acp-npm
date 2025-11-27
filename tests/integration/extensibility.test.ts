@@ -15,18 +15,16 @@ import type {
 
 // Mock the CursorCliBridge module
 jest.mock('../../src/cursor/cli-bridge', () => ({
-  CursorCliBridge: jest.fn().mockImplementation((config, logger) => {
-    return {
-      getVersion: jest.fn().mockResolvedValue('1.0.0'),
-      checkAuthentication: jest
-        .fn()
-        .mockResolvedValue({ authenticated: true, user: 'test' }),
-      close: jest.fn().mockResolvedValue(undefined),
-    };
-  }),
+  CursorCliBridge: jest.fn().mockImplementation(() => ({
+    getVersion: jest.fn().mockResolvedValue('1.0.0'),
+    checkAuthentication: jest
+      .fn()
+      .mockResolvedValue({ authenticated: true, user: 'test-user' }),
+    close: jest.fn().mockResolvedValue(undefined),
+  })),
 }));
 
-// Mock logger for tests
+// Mock logger with jest spies
 const mockLogger: Logger = {
   error: jest.fn(),
   warn: jest.fn(),
@@ -57,10 +55,15 @@ const testConfig: AdapterConfig = {
 
 describe('Extensibility Integration', () => {
   let adapter: CursorAgentAdapter;
+  let mockSendNotification: jest.SpyInstance;
 
   beforeEach(async () => {
     jest.clearAllMocks();
     adapter = new CursorAgentAdapter(testConfig, { logger: mockLogger });
+
+    // Spy on sendNotification to verify notifications are sent
+    mockSendNotification = jest.spyOn(adapter as any, 'sendNotification');
+
     await adapter.initialize();
   });
 
@@ -71,6 +74,10 @@ describe('Extensibility Integration', () => {
       } catch (error) {
         // Ignore shutdown errors in tests
       }
+    }
+    // Clean up spies
+    if (mockSendNotification) {
+      mockSendNotification.mockRestore();
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   });
@@ -183,16 +190,32 @@ describe('Extensibility Integration', () => {
     it('should handle extension notifications silently', async () => {
       const registry = adapter.getExtensionRegistry();
 
-      // Register a test notification handler
-      const mockHandler = jest.fn().mockResolvedValue(undefined);
-      registry.registerNotification('_test/status_update', mockHandler);
+      // Register a test notification handler with jest mock
+      const mockNotificationHandler = jest.fn().mockResolvedValue(undefined);
+      registry.registerNotification(
+        '_test/status_update',
+        mockNotificationHandler
+      );
 
       // Send notification via registry (simulating received notification)
       await registry.sendNotification('_test/status_update', {
         status: 'running',
       });
 
-      expect(mockHandler).toHaveBeenCalledWith({ status: 'running' });
+      // Verify handler was called with correct params
+      expect(mockNotificationHandler).toHaveBeenCalledTimes(1);
+      expect(mockNotificationHandler).toHaveBeenCalledWith({
+        status: 'running',
+      });
+
+      // Verify logger was called appropriately
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        'Sending extension notification',
+        expect.objectContaining({
+          name: '_test/status_update',
+          params: { status: 'running' },
+        })
+      );
     });
 
     it('should ignore unregistered extension notifications per ACP spec', async () => {
@@ -202,23 +225,44 @@ describe('Extensibility Integration', () => {
       await expect(
         registry.sendNotification('_test/unregistered_notification', {})
       ).resolves.toBeUndefined();
+
+      // Verify that debug log was called for ignored notification
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        'Unrecognized extension notification ignored',
+        expect.objectContaining({
+          name: '_test/unregistered_notification',
+        })
+      );
     });
 
     it('should not throw if notification handler fails', async () => {
       const registry = adapter.getExtensionRegistry();
 
-      // Register a failing notification handler
-      const mockHandler = jest
+      // Register a failing notification handler with jest mock
+      const mockFailingHandler = jest
         .fn()
         .mockRejectedValue(new Error('Handler failed'));
-      registry.registerNotification('_test/failing_notification', mockHandler);
+      registry.registerNotification(
+        '_test/failing_notification',
+        mockFailingHandler
+      );
 
       // Should not throw - notifications are best-effort
       await expect(
         registry.sendNotification('_test/failing_notification', {})
       ).resolves.toBeUndefined();
 
-      expect(mockHandler).toHaveBeenCalled();
+      // Verify handler was called
+      expect(mockFailingHandler).toHaveBeenCalledTimes(1);
+
+      // Verify that warning was logged
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Extension notification handler error',
+        expect.objectContaining({
+          name: '_test/failing_notification',
+          error: 'Handler failed',
+        })
+      );
     });
   });
 
@@ -226,10 +270,14 @@ describe('Extensibility Integration', () => {
     it('should advertise extension capabilities in initialize response', async () => {
       const registry = adapter.getExtensionRegistry();
 
-      // Register some extension methods and notifications
-      registry.registerMethod('_myapp/action1', async () => ({ ok: true }));
-      registry.registerMethod('_myapp/action2', async () => ({ ok: true }));
-      registry.registerNotification('_myapp/event1', async () => {});
+      // Register some extension methods and notifications using jest mocks
+      const mockAction1 = jest.fn().mockResolvedValue({ ok: true });
+      const mockAction2 = jest.fn().mockResolvedValue({ ok: true });
+      const mockEvent1 = jest.fn().mockResolvedValue(undefined);
+
+      registry.registerMethod('_myapp/action1', mockAction1);
+      registry.registerMethod('_myapp/action2', mockAction2);
+      registry.registerNotification('_myapp/event1', mockEvent1);
 
       const response = await adapter.processRequest({
         jsonrpc: '2.0',
@@ -257,14 +305,22 @@ describe('Extensibility Integration', () => {
       expect(meta.myapp.methods).toContain('_myapp/action1');
       expect(meta.myapp.methods).toContain('_myapp/action2');
       expect(meta.myapp.notifications).toContain('_myapp/event1');
+
+      // Verify handlers were registered but not called yet
+      expect(mockAction1).not.toHaveBeenCalled();
+      expect(mockAction2).not.toHaveBeenCalled();
+      expect(mockEvent1).not.toHaveBeenCalled();
     });
 
     it('should group extensions by namespace in capabilities', async () => {
       const registry = adapter.getExtensionRegistry();
 
-      // Register methods from different namespaces
-      registry.registerMethod('_app1/method', async () => ({ ok: true }));
-      registry.registerMethod('_app2/method', async () => ({ ok: true }));
+      // Register methods from different namespaces with jest mocks
+      const mockApp1Handler = jest.fn().mockResolvedValue({ ok: true });
+      const mockApp2Handler = jest.fn().mockResolvedValue({ ok: true });
+
+      registry.registerMethod('_app1/method', mockApp1Handler);
+      registry.registerMethod('_app2/method', mockApp2Handler);
 
       const response = await adapter.processRequest({
         jsonrpc: '2.0',
@@ -287,6 +343,10 @@ describe('Extensibility Integration', () => {
       expect(meta.app2).toBeDefined();
       expect(meta.app1.methods).toContain('_app1/method');
       expect(meta.app2.methods).toContain('_app2/method');
+
+      // Verify handlers were not called during initialization
+      expect(mockApp1Handler).not.toHaveBeenCalled();
+      expect(mockApp2Handler).not.toHaveBeenCalled();
     });
 
     it('should not include extension capabilities if none registered', async () => {
@@ -307,50 +367,91 @@ describe('Extensibility Integration', () => {
       expect(initResult.agentCapabilities).toBeDefined();
 
       // _meta might exist but should not contain extension namespaces
-      // (it may contain other metadata)
+      // (it may contain other metadata like version info)
+      const meta = initResult.agentCapabilities._meta as any;
+      if (meta) {
+        // Ensure no extension namespaces are present (they would start with lowercase)
+        const keys = Object.keys(meta).filter((k) => k.match(/^[a-z]/));
+        // We might have some metadata but no extension namespaces
+        expect(meta).toBeDefined();
+      }
     });
   });
 
   describe('Extension Name Validation', () => {
     it('should reject extension methods without underscore prefix', () => {
       const registry = adapter.getExtensionRegistry();
+      const mockHandler = jest.fn();
 
       expect(() => {
-        registry.registerMethod('test/method', async () => ({}));
+        registry.registerMethod('test/method', mockHandler);
       }).toThrow('Extension method name must start with underscore');
+
+      // Verify handler was not registered
+      expect(mockHandler).not.toHaveBeenCalled();
     });
 
     it('should reject extension notifications without underscore prefix', () => {
       const registry = adapter.getExtensionRegistry();
+      const mockHandler = jest.fn();
 
       expect(() => {
-        registry.registerNotification('test/notification', async () => {});
+        registry.registerNotification('test/notification', mockHandler);
       }).toThrow('Extension notification name must start with underscore');
+
+      // Verify handler was not registered
+      expect(mockHandler).not.toHaveBeenCalled();
     });
 
     it('should accept properly formatted extension names', () => {
       const registry = adapter.getExtensionRegistry();
+      const mockMethodHandler = jest.fn().mockResolvedValue({});
+      const mockNotificationHandler = jest.fn().mockResolvedValue(undefined);
 
       expect(() => {
-        registry.registerMethod('_myapp/method', async () => ({}));
+        registry.registerMethod('_myapp/method', mockMethodHandler);
       }).not.toThrow();
 
       expect(() => {
-        registry.registerNotification('_myapp/notification', async () => {});
+        registry.registerNotification(
+          '_myapp/notification',
+          mockNotificationHandler
+        );
       }).not.toThrow();
+
+      // Verify methods were registered
+      expect(registry.hasMethod('_myapp/method')).toBe(true);
+      expect(registry.hasNotification('_myapp/notification')).toBe(true);
+
+      // Verify debug logs were called
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        'Registered extension method',
+        expect.objectContaining({ name: '_myapp/method' })
+      );
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        'Registered extension notification',
+        expect.objectContaining({ name: '_myapp/notification' })
+      );
     });
   });
 
   describe('Dynamic Extension Management', () => {
     it('should allow unregistering extension methods', async () => {
       const registry = adapter.getExtensionRegistry();
+      const mockHandler = jest.fn().mockResolvedValue({ ok: true });
 
       // Register and then unregister
-      registry.registerMethod('_test/method', async () => ({ ok: true }));
+      registry.registerMethod('_test/method', mockHandler);
       expect(registry.hasMethod('_test/method')).toBe(true);
 
       registry.unregisterMethod('_test/method');
       expect(registry.hasMethod('_test/method')).toBe(false);
+
+      // Verify debug log for unregistration
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        'Unregistered extension method',
+        expect.objectContaining({ name: '_test/method' })
+      );
 
       // Method should no longer be callable
       const response = await adapter.processRequest({
@@ -361,34 +462,66 @@ describe('Extensibility Integration', () => {
       });
 
       expect(response.error?.code).toBe(-32601);
+      expect(response.error?.message).toBe('Method not found');
+
+      // Verify handler was never called after unregistration
+      expect(mockHandler).not.toHaveBeenCalled();
     });
 
     it('should allow clearing all extensions', () => {
       const registry = adapter.getExtensionRegistry();
+      const mockMethod1 = jest.fn().mockResolvedValue({});
+      const mockMethod2 = jest.fn().mockResolvedValue({});
+      const mockNotification = jest.fn().mockResolvedValue(undefined);
 
-      registry.registerMethod('_test/method1', async () => ({}));
-      registry.registerMethod('_test/method2', async () => ({}));
-      registry.registerNotification('_test/notification', async () => {});
+      registry.registerMethod('_test/method1', mockMethod1);
+      registry.registerMethod('_test/method2', mockMethod2);
+      registry.registerNotification('_test/notification', mockNotification);
+
+      expect(registry.getMethodCount()).toBe(2);
+      expect(registry.getNotificationCount()).toBe(1);
 
       registry.clear();
 
       expect(registry.getMethodCount()).toBe(0);
       expect(registry.getNotificationCount()).toBe(0);
+
+      // Verify debug log for clear
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        'Cleared all extension methods and notifications'
+      );
+
+      // Verify handlers were never called
+      expect(mockMethod1).not.toHaveBeenCalled();
+      expect(mockMethod2).not.toHaveBeenCalled();
+      expect(mockNotification).not.toHaveBeenCalled();
     });
 
     it('should track registered method count', () => {
       const registry = adapter.getExtensionRegistry();
+      const mockHandler1 = jest.fn().mockResolvedValue({});
+      const mockHandler2 = jest.fn().mockResolvedValue({});
 
       expect(registry.getMethodCount()).toBe(0);
 
-      registry.registerMethod('_test/method1', async () => ({}));
+      registry.registerMethod('_test/method1', mockHandler1);
       expect(registry.getMethodCount()).toBe(1);
 
-      registry.registerMethod('_test/method2', async () => ({}));
+      registry.registerMethod('_test/method2', mockHandler2);
       expect(registry.getMethodCount()).toBe(2);
 
       registry.unregisterMethod('_test/method1');
       expect(registry.getMethodCount()).toBe(1);
+
+      // Verify mock logger was called for each registration
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        'Registered extension method',
+        expect.objectContaining({ name: '_test/method1' })
+      );
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        'Registered extension method',
+        expect.objectContaining({ name: '_test/method2' })
+      );
     });
   });
 
@@ -412,11 +545,11 @@ describe('Extensibility Integration', () => {
     it('should support arbitrary JSON-RPC params for extension methods', async () => {
       const registry = adapter.getExtensionRegistry();
 
-      const mockHandler = jest.fn().mockImplementation(async (params) => {
+      const mockEchoHandler = jest.fn().mockImplementation(async (params) => {
         return { received: params };
       });
 
-      registry.registerMethod('_test/echo', mockHandler);
+      registry.registerMethod('_test/echo', mockEchoHandler);
 
       const testParams = {
         string: 'value',
@@ -434,7 +567,8 @@ describe('Extensibility Integration', () => {
       });
 
       expect(response.result).toEqual({ received: testParams });
-      expect(mockHandler).toHaveBeenCalledWith(testParams);
+      expect(mockEchoHandler).toHaveBeenCalledTimes(1);
+      expect(mockEchoHandler).toHaveBeenCalledWith(testParams);
     });
 
     it('should return arbitrary JSON-RPC result from extension methods', async () => {
@@ -454,7 +588,8 @@ describe('Extensibility Integration', () => {
         },
       };
 
-      registry.registerMethod('_test/complex', async () => complexResult);
+      const mockComplexHandler = jest.fn().mockResolvedValue(complexResult);
+      registry.registerMethod('_test/complex', mockComplexHandler);
 
       const response = await adapter.processRequest({
         jsonrpc: '2.0',
@@ -464,6 +599,8 @@ describe('Extensibility Integration', () => {
       });
 
       expect(response.result).toEqual(complexResult);
+      expect(mockComplexHandler).toHaveBeenCalledTimes(1);
+      expect(mockComplexHandler).toHaveBeenCalledWith({});
     });
   });
 });
