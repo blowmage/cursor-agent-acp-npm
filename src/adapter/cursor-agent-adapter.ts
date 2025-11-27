@@ -61,6 +61,7 @@ import { PermissionsHandler } from '../protocol/permissions';
 import type { ClientConnection } from '../client/client-connection';
 import { AcpFileSystemClient } from '../client/filesystem-client';
 import { FilesystemToolProvider } from '../tools/filesystem';
+import { SlashCommandsRegistry } from '../tools/slash-commands';
 
 export class CursorAgentAdapter implements ClientConnection {
   private config: AdapterConfig;
@@ -76,6 +77,7 @@ export class CursorAgentAdapter implements ClientConnection {
   private permissionsHandler?: PermissionsHandler;
   private initializationHandler?: InitializationHandler;
   private promptHandler?: PromptHandler;
+  private slashCommandsRegistry?: SlashCommandsRegistry;
 
   // ACP-compliant file system client
   private fileSystemClient?: AcpFileSystemClient;
@@ -444,6 +446,10 @@ export class CursorAgentAdapter implements ClientConnection {
     // Initialize CursorCliBridge
     this.cursorBridge = new CursorCliBridge(this.config, this.logger);
 
+    // Initialize SlashCommandsRegistry
+    this.slashCommandsRegistry = new SlashCommandsRegistry(this.logger);
+    this.registerDefaultCommands();
+
     // Initialize PermissionsHandler
     this.permissionsHandler = new PermissionsHandler({
       logger: this.logger,
@@ -479,6 +485,7 @@ export class CursorAgentAdapter implements ClientConnection {
       config: this.config,
       logger: this.logger,
       sendNotification: this.sendNotification.bind(this),
+      slashCommandsRegistry: this.slashCommandsRegistry,
     });
 
     // Initialize ACP-compliant file system client
@@ -501,6 +508,77 @@ export class CursorAgentAdapter implements ClientConnection {
     }
 
     this.logger.debug('All components initialized');
+  }
+
+  /**
+   * Register default slash commands
+   * Per ACP spec: Agents MAY advertise available commands
+   */
+  private registerDefaultCommands(): void {
+    if (!this.slashCommandsRegistry) {
+      return;
+    }
+
+    // Register example commands - these can be customized or extended
+    // Per ACP spec: Commands provide quick access to specific agent capabilities
+    this.slashCommandsRegistry.registerCommand(
+      'plan',
+      'Create a detailed implementation plan',
+      'description of what to plan'
+    );
+
+    // Note: Additional commands can be registered here or dynamically during runtime
+    this.logger.debug('Default slash commands registered', {
+      count: this.slashCommandsRegistry.getCommandCount(),
+    });
+  }
+
+  /**
+   * Send available_commands_update notification to client
+   * Per ACP spec: Agents MAY send this notification after creating/loading a session
+   *
+   * @param sessionId - The session ID
+   */
+  private sendAvailableCommandsUpdate(sessionId: string): void {
+    if (!this.slashCommandsRegistry) {
+      this.logger.debug(
+        'Slash commands registry not initialized, skipping notification'
+      );
+      return;
+    }
+
+    const commands = this.slashCommandsRegistry.getCommands();
+    if (commands.length === 0) {
+      this.logger.debug(
+        'No commands registered, skipping available_commands_update notification'
+      );
+      return;
+    }
+
+    // Build SDK-compliant SessionNotification
+    // Per ACP spec: sessionUpdate must be 'available_commands_update' and use 'availableCommands' field
+    const notification: SessionNotification = {
+      sessionId,
+      update: {
+        sessionUpdate: 'available_commands_update',
+        availableCommands: commands,
+      },
+      _meta: {
+        timestamp: new Date().toISOString(),
+      },
+    };
+
+    this.logger.debug('Sending available_commands_update notification', {
+      sessionId,
+      commandCount: commands.length,
+      commandNames: commands.map((c) => c.name),
+    });
+
+    this.sendNotification({
+      jsonrpc: '2.0',
+      method: 'session/update',
+      params: notification,
+    });
   }
 
   private async verifyCursorIntegration(): Promise<void> {
@@ -765,6 +843,9 @@ export class CursorAgentAdapter implements ClientConnection {
       },
     };
 
+    // Per ACP spec: Agent MAY send available_commands_update notification after creating a session
+    this.sendAvailableCommandsUpdate(sessionData.id);
+
     return {
       jsonrpc: '2.0' as const,
       id: request.id!,
@@ -885,6 +966,9 @@ export class CursorAgentAdapter implements ClientConnection {
         mcpServerCount: mcpServers.length,
       },
     };
+
+    // Per ACP spec: Agent MAY send available_commands_update notification after loading a session
+    this.sendAvailableCommandsUpdate(sessionId);
 
     return {
       jsonrpc: '2.0' as const,

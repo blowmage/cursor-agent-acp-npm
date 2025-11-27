@@ -50,8 +50,27 @@ const testConfig: AdapterConfig = {
 
 describe('CursorAgentAdapter - session/load', () => {
   let adapter: CursorAgentAdapter;
+  let sentNotifications: any[];
 
   beforeEach(async () => {
+    jest.clearAllMocks();
+    sentNotifications = [];
+
+    // Spy on process.stdout.write to capture notifications
+    const originalWrite = process.stdout.write;
+    jest.spyOn(process.stdout, 'write').mockImplementation((chunk: any) => {
+      const str = typeof chunk === 'string' ? chunk : chunk.toString();
+      try {
+        const notification = JSON.parse(str.trim());
+        if (notification.method === 'session/update') {
+          sentNotifications.push(notification);
+        }
+      } catch {
+        // Not JSON, ignore
+      }
+      return true;
+    });
+
     adapter = new CursorAgentAdapter(testConfig, { logger: mockLogger });
     await adapter.initialize();
 
@@ -66,9 +85,13 @@ describe('CursorAgentAdapter - session/load', () => {
       },
     };
     await adapter.processRequest(createRequest);
+
+    // Clear notifications from creation
+    sentNotifications = [];
   });
 
   afterEach(async () => {
+    jest.restoreAllMocks();
     if (adapter) {
       try {
         await adapter.shutdown();
@@ -288,6 +311,112 @@ describe('CursorAgentAdapter - session/load', () => {
 
       expect(response.error).toBeDefined();
       expect(response.error?.message).toContain('cwd must be a string');
+    });
+  });
+
+  describe('available_commands_update notification', () => {
+    it('should send available_commands_update notification after session load', async () => {
+      const createResponse = await adapter.processRequest({
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-create-load',
+        params: {
+          cwd: '/tmp/test',
+          mcpServers: [],
+        },
+      });
+
+      const sessionId = createResponse.result.sessionId;
+
+      // Clear notifications from creation
+      sentNotifications = [];
+
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/load',
+        id: 'test-load-1',
+        params: {
+          sessionId,
+          cwd: '/tmp/test',
+          mcpServers: [],
+        },
+      };
+
+      const response = await adapter.processRequest(request);
+
+      expect(response.result).toBeDefined();
+
+      // Wait a bit for notification to be sent
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      // Should have sent available_commands_update notification
+      const commandNotifications = sentNotifications.filter(
+        (n) => n.params?.update?.sessionUpdate === 'available_commands_update'
+      );
+
+      expect(commandNotifications.length).toBeGreaterThan(0);
+
+      const notification = commandNotifications[0]!;
+      expect(notification.jsonrpc).toBe('2.0');
+      expect(notification.method).toBe('session/update');
+      expect(notification.params.sessionId).toBe(sessionId);
+      expect(notification.params.update.sessionUpdate).toBe(
+        'available_commands_update'
+      );
+      expect(notification.params.update.availableCommands).toBeInstanceOf(
+        Array
+      );
+      expect(
+        notification.params.update.availableCommands.length
+      ).toBeGreaterThan(0);
+    });
+
+    it('should include commands in load notification', async () => {
+      const createResponse = await adapter.processRequest({
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-create-load-2',
+        params: {
+          cwd: '/tmp/test',
+          mcpServers: [],
+        },
+      });
+
+      const sessionId = createResponse.result.sessionId;
+
+      // Clear notifications from creation
+      sentNotifications = [];
+
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/load',
+        id: 'test-load-2',
+        params: {
+          sessionId,
+          cwd: '/tmp/test',
+          mcpServers: [],
+        },
+      };
+
+      await adapter.processRequest(request);
+
+      // Wait for notification
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const commandNotifications = sentNotifications.filter(
+        (n) => n.params?.update?.sessionUpdate === 'available_commands_update'
+      );
+
+      expect(commandNotifications.length).toBeGreaterThan(0);
+
+      const commands = commandNotifications[0]!.params.update.availableCommands;
+
+      // Should have at least the default "plan" command
+      const planCommand = commands.find((c: any) => c.name === 'plan');
+      expect(planCommand).toBeDefined();
+      expect(planCommand.description).toBe(
+        'Create a detailed implementation plan'
+      );
     });
   });
 });

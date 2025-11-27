@@ -58,14 +58,33 @@ const testConfig: AdapterConfig = {
 
 describe('session/new - Parameter Validation', () => {
   let adapter: CursorAgentAdapter;
+  let sentNotifications: any[];
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    sentNotifications = [];
+
+    // Spy on process.stdout.write to capture notifications
+    const originalWrite = process.stdout.write;
+    jest.spyOn(process.stdout, 'write').mockImplementation((chunk: any) => {
+      const str = typeof chunk === 'string' ? chunk : chunk.toString();
+      try {
+        const notification = JSON.parse(str.trim());
+        if (notification.method === 'session/update') {
+          sentNotifications.push(notification);
+        }
+      } catch {
+        // Not JSON, ignore
+      }
+      return true;
+    });
+
     adapter = new CursorAgentAdapter(testConfig, { logger: mockLogger });
     await adapter.initialize();
   });
 
   afterEach(async () => {
+    jest.restoreAllMocks();
     if (adapter) {
       try {
         await adapter.shutdown();
@@ -810,6 +829,129 @@ describe('session/new - Parameter Validation', () => {
       const sessionIds = responses.map((r) => r.result.sessionId);
       const uniqueIds = new Set(sessionIds);
       expect(uniqueIds.size).toBe(sessionIds.length);
+    });
+  });
+
+  describe('available_commands_update notification', () => {
+    it('should send available_commands_update notification after session creation', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-1',
+        params: {
+          cwd: '/tmp',
+          mcpServers: [],
+        },
+      };
+
+      const response = await adapter.processRequest(request);
+
+      expect(response.result).toBeDefined();
+      expect(response.result.sessionId).toBeDefined();
+
+      // Wait a bit for notification to be sent
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      // Should have sent available_commands_update notification
+      const commandNotifications = sentNotifications.filter(
+        (n) => n.params?.update?.sessionUpdate === 'available_commands_update'
+      );
+
+      expect(commandNotifications.length).toBeGreaterThan(0);
+
+      const notification = commandNotifications[0]!;
+      expect(notification.jsonrpc).toBe('2.0');
+      expect(notification.method).toBe('session/update');
+      expect(notification.params.sessionId).toBe(response.result.sessionId);
+      expect(notification.params.update.sessionUpdate).toBe(
+        'available_commands_update'
+      );
+      expect(notification.params.update.availableCommands).toBeInstanceOf(
+        Array
+      );
+      expect(
+        notification.params.update.availableCommands.length
+      ).toBeGreaterThan(0);
+
+      // Verify command structure matches SDK types
+      const command = notification.params.update.availableCommands[0];
+      expect(command).toHaveProperty('name');
+      expect(command).toHaveProperty('description');
+      expect(typeof command.name).toBe('string');
+      expect(typeof command.description).toBe('string');
+    });
+
+    it('should include default commands in notification', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-1',
+        params: {
+          cwd: '/tmp',
+          mcpServers: [],
+        },
+      };
+
+      await adapter.processRequest(request);
+
+      // Wait for notification
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const commandNotifications = sentNotifications.filter(
+        (n) => n.params?.update?.sessionUpdate === 'available_commands_update'
+      );
+
+      expect(commandNotifications.length).toBeGreaterThan(0);
+
+      const commands = commandNotifications[0]!.params.update.availableCommands;
+
+      // Should have at least the default "plan" command
+      const planCommand = commands.find((c: any) => c.name === 'plan');
+      expect(planCommand).toBeDefined();
+      expect(planCommand.description).toBe(
+        'Create a detailed implementation plan'
+      );
+      expect(planCommand.input).toBeDefined();
+      expect(planCommand.input.hint).toBe('description of what to plan');
+    });
+
+    it('should not send notification when no commands are registered', async () => {
+      // Create adapter and clear commands
+      const adapterWithNoCommands = new CursorAgentAdapter(testConfig, {
+        logger: mockLogger,
+      });
+      await adapterWithNoCommands.initialize();
+
+      // Access private registry and clear it
+      const registry = (adapterWithNoCommands as any).slashCommandsRegistry;
+      if (registry) {
+        registry.clear();
+      }
+
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-1',
+        params: {
+          cwd: '/tmp',
+          mcpServers: [],
+        },
+      };
+
+      sentNotifications = [];
+      await adapterWithNoCommands.processRequest(request);
+
+      // Wait for notification
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const commandNotifications = sentNotifications.filter(
+        (n) => n.params?.update?.sessionUpdate === 'available_commands_update'
+      );
+
+      // Should not send notification when no commands
+      expect(commandNotifications.length).toBe(0);
+
+      await adapterWithNoCommands.shutdown();
     });
   });
 });

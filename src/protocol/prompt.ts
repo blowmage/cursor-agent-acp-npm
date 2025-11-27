@@ -15,6 +15,7 @@ import type {
   SessionNotification,
 } from '@agentclientprotocol/sdk';
 import type { Error as JsonRpcError } from '@agentclientprotocol/sdk';
+import type { SlashCommandsRegistry } from '../tools/slash-commands';
 import {
   ProtocolError,
   SessionError,
@@ -48,6 +49,7 @@ export interface PromptHandlerOptions {
     method: string;
     params?: any;
   }) => void;
+  slashCommandsRegistry?: SlashCommandsRegistry;
 }
 
 export interface StreamOptions {
@@ -142,6 +144,7 @@ export class PromptHandler {
     method: string;
     params?: any;
   }) => void;
+  private readonly slashCommandsRegistry: SlashCommandsRegistry | undefined;
   // Processing configuration
   private readonly processingConfig: PromptProcessingConfig = {
     echoUserMessages: true,
@@ -158,6 +161,7 @@ export class PromptHandler {
     this.config = options.config;
     this.logger = options.logger;
     this.sendNotification = options.sendNotification;
+    this.slashCommandsRegistry = options.slashCommandsRegistry;
     this.contentProcessor = new ContentProcessor({
       config: this.config,
       logger: this.logger,
@@ -932,6 +936,86 @@ export class PromptHandler {
   }
 
   /**
+   * Detect slash command in content blocks
+   * Per ACP spec: Commands appear as regular text content starting with "/"
+   *
+   * @param content - Array of content blocks to check
+   * @returns Command name and input text, or null if no command detected
+   */
+  private detectSlashCommand(content: ContentBlock[]): {
+    command: string;
+    input: string;
+  } | null {
+    // Look for text content blocks that start with "/"
+    for (const block of content) {
+      if (block.type === 'text' && block.text) {
+        const text = block.text.trim();
+        if (text.startsWith('/')) {
+          // Extract command name (until space or end) and remaining input
+          const match = text.match(/^\/(\w+)(?:\s+(.*))?$/);
+          if (match) {
+            const command = match[1]!;
+            const input = match[2] || '';
+            this.logger.debug('Detected slash command', { command, input });
+            return { command, input };
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Process a slash command
+   * Per ACP spec: Commands are processed as part of regular prompt flow
+   *
+   * @param sessionId - The session ID
+   * @param command - Command name
+   * @param input - Command input text
+   * @returns True if command was processed, false if not recognized
+   */
+  private async processSlashCommand(
+    sessionId: string,
+    command: string,
+    input: string
+  ): Promise<boolean> {
+    if (!this.slashCommandsRegistry) {
+      this.logger.debug('Slash commands registry not available');
+      return false;
+    }
+
+    // Check if command exists
+    if (!this.slashCommandsRegistry.hasCommand(command)) {
+      this.logger.debug('Unknown slash command', { command });
+      return false;
+    }
+
+    const commandDef = this.slashCommandsRegistry.getCommand(command);
+    if (!commandDef) {
+      return false;
+    }
+
+    this.logger.info('Processing slash command', {
+      sessionId,
+      command,
+      input,
+      description: commandDef.description,
+    });
+
+    // For now, commands are processed by forwarding to Cursor CLI
+    // The command text is included as part of the regular prompt
+    // Future enhancements could add specialized command handlers here
+
+    // Log command execution
+    this.logger.debug('Slash command will be processed as part of prompt', {
+      command,
+      input,
+    });
+
+    return true;
+  }
+
+  /**
    * Process a regular (non-streaming) prompt asynchronously
    * Sends session/update notifications as content is processed
    * Returns result with metadata
@@ -956,6 +1040,22 @@ export class PromptHandler {
         sessionId,
         cwd: workingDir,
       });
+
+      // Detect slash command in content
+      // Per ACP spec: Commands are included as regular user messages
+      const commandInfo = this.detectSlashCommand(content);
+      if (commandInfo) {
+        const commandProcessed = await this.processSlashCommand(
+          sessionId,
+          commandInfo.command,
+          commandInfo.input
+        );
+        if (commandProcessed) {
+          this.logger.debug('Slash command detected and acknowledged', {
+            command: commandInfo.command,
+          });
+        }
+      }
 
       // Add user message to session
       const userMessage: ConversationMessage = {

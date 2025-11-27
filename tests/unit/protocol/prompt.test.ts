@@ -4,6 +4,7 @@
 
 import { PromptHandler } from '../../../src/protocol/prompt';
 import { ContentProcessor } from '../../../src/protocol/content';
+import { SlashCommandsRegistry } from '../../../src/tools/slash-commands';
 import type {
   AcpRequest,
   SessionPromptParams,
@@ -72,16 +73,29 @@ const mockConfig: AdapterConfig = {
 
 describe('PromptHandler', () => {
   let promptHandler: PromptHandler;
+  let mockSlashCommandsRegistry: SlashCommandsRegistry;
+  let mockSendNotification: jest.Mock;
 
   beforeEach(() => {
     jest.clearAllMocks();
+
+    mockSlashCommandsRegistry = new SlashCommandsRegistry(mockLogger);
+    mockSlashCommandsRegistry.registerCommand(
+      'plan',
+      'Create a plan',
+      'what to plan'
+    );
+    mockSlashCommandsRegistry.registerCommand('web', 'Search the web', 'query');
+
+    mockSendNotification = jest.fn();
 
     promptHandler = new PromptHandler({
       sessionManager: mockSessionManager as any,
       cursorBridge: mockCursorBridge as any,
       config: mockConfig,
       logger: mockLogger,
-      sendNotification: jest.fn(),
+      sendNotification: mockSendNotification,
+      slashCommandsRegistry: mockSlashCommandsRegistry,
     });
   });
 
@@ -676,6 +690,7 @@ describe('PromptHandler', () => {
     let handlerWithNotifications: PromptHandler;
 
     beforeEach(() => {
+      jest.clearAllMocks(); // Clear mocks including logger calls from setup
       sentNotifications = [];
       handlerWithNotifications = new PromptHandler({
         sessionManager: mockSessionManager as any,
@@ -685,6 +700,8 @@ describe('PromptHandler', () => {
         sendNotification: (notification) => {
           sentNotifications.push(notification);
         },
+        // Don't pass slashCommandsRegistry for these tests
+        slashCommandsRegistry: undefined,
       });
     });
 
@@ -922,6 +939,7 @@ describe('PromptHandler', () => {
     let handlerWithNotifications: PromptHandler;
 
     beforeEach(() => {
+      jest.clearAllMocks(); // Clear mocks including logger calls from setup
       sentNotifications = [];
       handlerWithNotifications = new PromptHandler({
         sessionManager: mockSessionManager as any,
@@ -931,6 +949,8 @@ describe('PromptHandler', () => {
         sendNotification: (notification) => {
           sentNotifications.push(notification);
         },
+        // Don't pass slashCommandsRegistry for these tests
+        slashCommandsRegistry: undefined,
       });
     });
 
@@ -1143,6 +1163,249 @@ describe('PromptHandler', () => {
       expect(mockLogger.debug).toHaveBeenCalledWith('Updating plan', {
         sessionId: 'session1',
         entryCount: 0,
+      });
+    });
+  });
+
+  describe('slash command detection and processing', () => {
+    beforeEach(() => {
+      mockSessionManager.loadSession.mockResolvedValue({
+        id: 'test-session-1',
+        metadata: { name: 'Test Session', cwd: '/tmp' },
+        conversation: [],
+        state: { lastActivity: new Date(), messageCount: 0 },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      mockCursorBridge.sendPrompt.mockResolvedValue({
+        success: true,
+        stdout: 'Command processed',
+        stderr: '',
+        exitCode: 0,
+        metadata: {},
+      });
+    });
+
+    it('should detect slash command at start of text content', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/prompt',
+        id: 'test-request-1',
+        params: {
+          sessionId: 'test-session-1',
+          content: [
+            {
+              type: 'text',
+              text: '/plan create a new feature',
+            },
+          ],
+          stream: false,
+        },
+      };
+
+      await promptHandler.processPrompt(request);
+
+      // Wait for async processing
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(mockLogger.debug).toHaveBeenCalledWith('Detected slash command', {
+        command: 'plan',
+        input: 'create a new feature',
+      });
+
+      expect(mockLogger.info).toHaveBeenCalledWith('Processing slash command', {
+        sessionId: 'test-session-1',
+        command: 'plan',
+        input: 'create a new feature',
+        description: 'Create a plan',
+      });
+
+      // Command should still be processed as regular prompt
+      expect(mockCursorBridge.sendPrompt).toHaveBeenCalled();
+    });
+
+    it('should detect slash command without input', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/prompt',
+        id: 'test-request-1',
+        params: {
+          sessionId: 'test-session-1',
+          content: [
+            {
+              type: 'text',
+              text: '/web',
+            },
+          ],
+          stream: false,
+        },
+      };
+
+      await promptHandler.processPrompt(request);
+
+      // Wait for async processing
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(mockLogger.debug).toHaveBeenCalledWith('Detected slash command', {
+        command: 'web',
+        input: '',
+      });
+    });
+
+    it('should not detect command when text does not start with slash', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/prompt',
+        id: 'test-request-1',
+        params: {
+          sessionId: 'test-session-1',
+          content: [
+            {
+              type: 'text',
+              text: 'This is a regular message /plan',
+            },
+          ],
+          stream: false,
+        },
+      };
+
+      await promptHandler.processPrompt(request);
+
+      // Wait for async processing
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(mockLogger.debug).not.toHaveBeenCalledWith(
+        'Detected slash command',
+        expect.anything()
+      );
+    });
+
+    it('should handle unknown slash command gracefully', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/prompt',
+        id: 'test-request-1',
+        params: {
+          sessionId: 'test-session-1',
+          content: [
+            {
+              type: 'text',
+              text: '/unknown command with input',
+            },
+          ],
+          stream: false,
+        },
+      };
+
+      await promptHandler.processPrompt(request);
+
+      // Wait for async processing
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(mockLogger.debug).toHaveBeenCalledWith('Unknown slash command', {
+        command: 'unknown',
+      });
+
+      // Should still process as regular prompt
+      expect(mockCursorBridge.sendPrompt).toHaveBeenCalled();
+    });
+
+    it('should handle command detection with multiple content blocks', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/prompt',
+        id: 'test-request-1',
+        params: {
+          sessionId: 'test-session-1',
+          content: [
+            {
+              type: 'text',
+              text: 'Some regular text',
+            },
+            {
+              type: 'text',
+              text: '/plan create feature',
+            },
+          ],
+          stream: false,
+        },
+      };
+
+      await promptHandler.processPrompt(request);
+
+      // Wait for async processing
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      // Should detect command in second block
+      expect(mockLogger.debug).toHaveBeenCalledWith('Detected slash command', {
+        command: 'plan',
+        input: 'create feature',
+      });
+    });
+
+    it('should work without slash commands registry', async () => {
+      const handlerWithoutRegistry = new PromptHandler({
+        sessionManager: mockSessionManager as any,
+        cursorBridge: mockCursorBridge as any,
+        config: mockConfig,
+        logger: mockLogger,
+        sendNotification: mockSendNotification,
+        // No slashCommandsRegistry provided
+      });
+
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/prompt',
+        id: 'test-request-1',
+        params: {
+          sessionId: 'test-session-1',
+          content: [
+            {
+              type: 'text',
+              text: '/plan test',
+            },
+          ],
+          stream: false,
+        },
+      };
+
+      await handlerWithoutRegistry.processPrompt(request);
+
+      // Wait for async processing
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      // Should not crash, just log that registry is not available
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        'Slash commands registry not available'
+      );
+    });
+
+    it('should extract command name correctly with whitespace', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/prompt',
+        id: 'test-request-1',
+        params: {
+          sessionId: 'test-session-1',
+          content: [
+            {
+              type: 'text',
+              text: '/web   multiple   spaces   in   input',
+            },
+          ],
+          stream: false,
+        },
+      };
+
+      await promptHandler.processPrompt(request);
+
+      // Wait for async processing
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(mockLogger.debug).toHaveBeenCalledWith('Detected slash command', {
+        command: 'web',
+        input: 'multiple   spaces   in   input',
       });
     });
   });
