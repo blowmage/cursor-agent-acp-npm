@@ -74,6 +74,28 @@ interface InitializationMetrics {
   totalTime: number;
 }
 
+/**
+ * Session capabilities structure
+ * Per ACP schema: https://agentclientprotocol.com/protocol/schema#sessioncapabilities
+ */
+interface SessionCapabilities {
+  /**
+   * Extension point for custom session capabilities
+   * Per ACP spec: _meta field for implementation-specific information
+   */
+  _meta?: {
+    /**
+     * Indicates whether the agent supports session modes
+     */
+    supportsSessionModes?: boolean;
+    /**
+     * Indicates whether the agent supports session/set_mode method
+     */
+    supportsSetMode?: boolean;
+    [key: string]: unknown;
+  };
+}
+
 export class InitializationHandler {
   // Protocol version constants
   private static readonly SUPPORTED_VERSIONS: readonly number[] = [1];
@@ -700,7 +722,9 @@ export class InitializationHandler {
     // Build capabilities object with sessionCapabilities
     // Note: AgentCapabilities type in SDK 0.5.1 may not include sessionCapabilities yet,
     // but we include it per the ACP schema for forward compatibility
-    const capabilities: AgentCapabilities & { sessionCapabilities?: any } = {
+    const capabilities: AgentCapabilities & {
+      sessionCapabilities?: SessionCapabilities;
+    } = {
       // Session Management
       // -----------------
       // Per ACP spec: Indicates whether agent supports session/load
