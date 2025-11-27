@@ -821,8 +821,8 @@ export class InitializationHandler {
     const capabilities: Record<string, unknown> = {};
     for (const [namespace, extensions] of namespaces) {
       capabilities[namespace] = {
-        methods: extensions.methods,
-        notifications: extensions.notifications,
+        ...(extensions.methods.length > 0 && { methods: extensions.methods }),
+        ...(extensions.notifications.length > 0 && { notifications: extensions.notifications }),
       };
     }
 
