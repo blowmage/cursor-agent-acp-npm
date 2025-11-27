@@ -3,8 +3,8 @@
 /**
  * Cursor Agent ACP Adapter CLI Entry Point
  *
- * This is the main executable that starts the ACP adapter server.
- * It handles command-line arguments, configuration, and starts the adapter.
+ * This is the main executable that starts the ACP adapter server using stdio transport.
+ * Per ACP spec, stdio is the default and recommended transport for agent-client communication.
  */
 
 import { program } from 'commander';
@@ -23,9 +23,6 @@ interface CliOptions {
   logLevel: string;
   logFile?: string;
   sessionDir: string;
-  port?: string;
-  stdio: boolean;
-  http?: boolean;
   timeout: string;
   retries: string;
   maxSessions: string;
@@ -77,9 +74,6 @@ program
     'session storage directory',
     '~/.cursor-sessions'
   )
-  .option('-p, --port <number>', 'port to listen on (for HTTP transport)')
-  .option('--stdio', 'use stdio transport (default)', true)
-  .option('--http', 'use HTTP transport instead of stdio')
   .option('-t, --timeout <ms>', 'cursor-agent timeout in milliseconds', '30000')
   .option(
     '-r, --retries <count>',
@@ -108,7 +102,7 @@ program
   .option('--validate', 'validate configuration and exit')
   .option('--test-cursor', 'test cursor-agent connectivity and exit')
   .action(() => {
-    // Default action: run the adapter in stdio mode
+    // Default action: run the adapter in stdio mode (ACP standard transport)
     // This runs when no subcommand is specified
   });
 
@@ -318,19 +312,10 @@ async function main(): Promise<void> {
       process.exit(1);
     });
 
-    // Start the adapter
-    logger.info('Starting ACP adapter server...');
-
-    if (options.http) {
-      // HTTP transport mode
-      const port = options.port ? parseInt(options.port, 10) : 3000;
-      await adapter.startHttpServer(port);
-      logger.info(`🚀 ACP adapter listening on HTTP port ${port}`);
-    } else {
-      // Default stdio transport mode
-      await adapter.startStdio();
-      logger.info('🚀 ACP adapter listening on stdio');
-    }
+    // Start the adapter with stdio transport (ACP standard)
+    logger.info('Starting ACP adapter server with stdio transport...');
+    await adapter.startStdio();
+    logger.info('🚀 ACP adapter listening on stdio (per ACP spec)');
 
     // Keep the process running - don't write to stdout!
     // stdout is reserved for JSON-RPC messages only in ACP protocol

@@ -5,10 +5,9 @@
  * - ACP protocol handling (initialization, sessions, prompts)
  * - Cursor CLI integration
  * - Tool registry and execution
- * - HTTP/stdio transport handling
+ * - Stdio transport handling (per ACP spec)
  */
 
-import { createServer, Server } from 'http';
 import {
   AgentSideConnection,
   ndJsonStream,
@@ -88,9 +87,6 @@ export class CursorAgentAdapter implements ClientConnection {
   // SDK connection for bi-directional communication
   private agentConnection?: AgentSideConnection;
 
-  // Transport servers
-  private httpServer?: Server;
-
   constructor(config: AdapterConfig, options: AdapterOptions = {}) {
     this.config = config;
     this.logger =
@@ -146,8 +142,34 @@ export class CursorAgentAdapter implements ClientConnection {
   /**
    * Start the adapter with stdio transport (for ACP clients)
    *
-   * Per ACP spec: Uses SDK's AgentSideConnection for bi-directional
-   * communication, enabling file system tools to call client methods.
+   * Per ACP Transport Specification: https://agentclientprotocol.com/protocol/transports
+   *
+   * Stdio is the default and recommended transport for the Agent Client Protocol.
+   * This implementation strictly follows the ACP spec:
+   *
+   * ## Transport Requirements:
+   * - Client launches the agent as a subprocess
+   * - Agent reads JSON-RPC messages from stdin
+   * - Agent writes JSON-RPC messages to stdout
+   * - Messages are delimited by newlines (\n)
+   * - Messages MUST NOT contain embedded newlines
+   * - stderr is used for logging (UTF-8 strings only)
+   * - Only valid ACP messages on stdin/stdout
+   *
+   * ## Implementation Details:
+   * - Uses SDK's AgentSideConnection for protocol handling
+   * - Uses ndJsonStream for newline-delimited JSON-RPC
+   * - Converts Node.js streams to Web Streams API
+   * - Handles stdin buffering before stream initialization
+   * - Proper cleanup on connection close or error
+   * - Enables bi-directional communication for file system operations
+   *
+   * ## Error Handling:
+   * - Malformed JSON triggers connection error
+   * - Stream errors are logged and propagated
+   * - Graceful shutdown on connection close
+   *
+   * @throws {AdapterError} If adapter is already running or stdio setup fails
    */
   async startStdio(): Promise<void> {
     if (this.isRunning) {
@@ -155,43 +177,49 @@ export class CursorAgentAdapter implements ClientConnection {
     }
 
     try {
-      this.logger.info('Starting ACP adapter with stdio transport via SDK');
+      this.logger.info(
+        'Starting ACP adapter with stdio transport (per ACP spec)'
+      );
       this.startTime = new Date();
       this.isRunning = true;
 
-      // Create SDK stream for stdio communication
-      // Convert Node.js streams to Web streams for SDK
+      // Create Web Streams for stdout
+      // Per ACP spec: JSON-RPC messages written to stdout, delimited by newlines
       const output = new WritableStream<Uint8Array>({
         write(chunk) {
           process.stdout.write(chunk);
         },
       });
 
-      // Buffer for pre-existing stdin data
+      // Buffer for pre-existing stdin data before stream starts
+      // Ensures no messages are lost during initialization
       const stdinBuffer: Buffer[] = [];
       let started = false;
-      // Temporary listener to buffer data before stream starts
       const preDataListener = (chunk: Buffer) => {
         stdinBuffer.push(chunk);
       };
       process.stdin.on('data', preDataListener);
 
-      // Define handlers in outer scope so they can be accessed in cancel()
+      // Define handlers in outer scope for proper cleanup in cancel()
       let dataHandler: ((chunk: Buffer) => void) | null = null;
       let endHandler: (() => void) | null = null;
       let errorHandler: ((err: Error) => void) | null = null;
 
+      // Create Web Streams for stdin
+      // Per ACP spec: JSON-RPC messages read from stdin, delimited by newlines
       const input = new ReadableStream<Uint8Array>({
         start(controller) {
           started = true;
-          // Remove temporary listener
+          // Remove temporary buffer listener
           process.stdin.removeListener('data', preDataListener);
-          // Drain buffered data
+
+          // Drain any buffered data to prevent message loss
           for (const chunk of stdinBuffer) {
             controller.enqueue(new Uint8Array(chunk));
           }
           stdinBuffer.length = 0;
-          // Initialize handlers (accessible from cancel via closure)
+
+          // Set up permanent stream handlers
           dataHandler = (chunk: Buffer) => {
             controller.enqueue(new Uint8Array(chunk));
           };
@@ -201,18 +229,19 @@ export class CursorAgentAdapter implements ClientConnection {
           errorHandler = (err: Error) => {
             controller.error(err);
           };
-          // Attach handlers to stdin
+
+          // Attach handlers to stdin stream
           process.stdin.on('data', dataHandler);
           process.stdin.on('end', endHandler);
           process.stdin.on('error', errorHandler);
         },
         cancel() {
+          // Per ACP spec: Clean up resources on connection close
           // Remove listeners to prevent memory leaks
           if (started && dataHandler && endHandler && errorHandler) {
             process.stdin.removeListener('data', dataHandler);
             process.stdin.removeListener('end', endHandler);
             process.stdin.removeListener('error', errorHandler);
-            // Clear references to allow garbage collection
             dataHandler = null;
             endHandler = null;
             errorHandler = null;
@@ -220,66 +249,36 @@ export class CursorAgentAdapter implements ClientConnection {
         },
       });
 
+      // Use SDK's ndJsonStream for newline-delimited JSON-RPC
+      // Per ACP spec: Messages delimited by \n, no embedded newlines allowed
       const stream = ndJsonStream(output, input);
 
-      this.logger.debug('Creating AgentSideConnection');
+      this.logger.debug('Creating AgentSideConnection with stdio transport');
 
-      // Create AgentSideConnection with our Agent implementation
+      // Create SDK AgentSideConnection with our Agent implementation
+      // This handles all JSON-RPC 2.0 protocol details per ACP spec
       this.agentConnection = new AgentSideConnection((conn) => {
-        this.logger.debug('Agent factory called - connection established');
+        this.logger.debug(
+          'AgentSideConnection established - stdio transport active'
+        );
         return new CursorAgentImplementation(this, conn, this.logger);
       }, stream);
 
-      this.logger.info('Adapter started successfully with SDK stdio transport');
+      this.logger.info(
+        'Adapter started successfully with stdio transport (ACP compliant)'
+      );
 
       // Wait for connection to close
+      // Per ACP spec: Connection lifecycle managed by client
       await this.agentConnection.closed;
 
-      this.logger.info('Connection closed, shutting down adapter');
+      this.logger.info('Stdio connection closed, shutting down adapter');
       await this.shutdown();
     } catch (error) {
       this.isRunning = false;
-      this.logger.error('Failed to start SDK stdio transport', error);
+      this.logger.error('Failed to start stdio transport', error);
       throw new AdapterError(
         `Failed to start stdio transport: ${error instanceof Error ? error.message : String(error)}`,
-        'STARTUP_ERROR',
-        error instanceof Error ? error : undefined
-      );
-    }
-  }
-
-  /**
-   * Start the adapter with HTTP transport
-   */
-  async startHttpServer(port: number): Promise<void> {
-    if (this.isRunning) {
-      throw new AdapterError('Adapter is already running', 'ADAPTER_RUNNING');
-    }
-
-    try {
-      this.logger.info(
-        `Starting ACP adapter with HTTP transport on port ${port}`
-      );
-      this.startTime = new Date();
-
-      // Create HTTP server
-      this.httpServer = createServer(this.handleHttpRequest.bind(this));
-
-      await new Promise<void>((resolve, reject) => {
-        this.httpServer!.listen(port, () => {
-          this.isRunning = true;
-          this.logger.info(`HTTP server listening on port ${port}`);
-          resolve();
-        });
-
-        this.httpServer!.on('error', (error) => {
-          reject(error);
-        });
-      });
-    } catch (error) {
-      this.isRunning = false;
-      throw new AdapterError(
-        `Failed to start HTTP server: ${error instanceof Error ? error.message : String(error)}`,
         'STARTUP_ERROR',
         error instanceof Error ? error : undefined
       );
@@ -293,15 +292,7 @@ export class CursorAgentAdapter implements ClientConnection {
     try {
       this.logger.info('Shutting down ACP adapter...');
 
-      // Close HTTP server if running
-      if (this.httpServer) {
-        await new Promise<void>((resolve) => {
-          this.httpServer!.close(() => resolve());
-        });
-        delete this.httpServer;
-      }
-
-      // Always cleanup components (even if not formally started)
+      // Cleanup components
       await this.cleanup();
 
       this.isRunning = false;
@@ -745,70 +736,6 @@ export class CursorAgentAdapter implements ClientConnection {
       fullNotification: notificationStr,
     });
     process.stdout.write(`${notificationStr}\n`);
-  }
-
-  private async handleHttpRequest(req: any, res: any): Promise<void> {
-    // Set CORS headers
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-    if (req.method === 'OPTIONS') {
-      res.writeHead(204);
-      res.end();
-      return;
-    }
-
-    if (req.method !== 'POST') {
-      res.writeHead(405, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Method not allowed' }));
-      return;
-    }
-
-    try {
-      let body = '';
-      req.on('data', (chunk: Buffer) => {
-        body += chunk.toString();
-      });
-
-      req.on('end', async () => {
-        try {
-          const request: Request | Request1 = JSON.parse(body);
-
-          // Per JSON-RPC 2.0 spec: Notifications (requests without id) do not receive responses
-          if (this.isNotification(request)) {
-            await this.processRequest(request);
-            res.writeHead(204); // No Content
-            res.end();
-            return;
-          }
-
-          const response = await this.processRequest(request);
-
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(response));
-        } catch (error) {
-          this.logger.error('Error processing HTTP request', { error, body });
-
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(
-            JSON.stringify({
-              jsonrpc: '2.0',
-              id: null,
-              error: {
-                code: -32700,
-                message: 'Parse error',
-                data: error instanceof Error ? error.message : String(error),
-              },
-            })
-          );
-        }
-      });
-    } catch (error) {
-      this.logger.error('HTTP request error', error);
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Internal server error' }));
-    }
   }
 
   // ACP Method handlers
@@ -1466,14 +1393,6 @@ export class CursorAgentAdapter implements ClientConnection {
       id: request.id,
       result,
     };
-  }
-
-  /**
-   * Check if an ACP request is a notification (no response expected)
-   * Per JSON-RPC 2.0 spec: Notifications are requests without an id field
-   */
-  private isNotification(request: Request | Request1): boolean {
-    return request.id === null || request.id === undefined;
   }
 
   private async handleRequestPermission(request: Request | Request1): Promise<{
