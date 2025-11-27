@@ -509,9 +509,13 @@ export class CursorAgentAdapter implements ClientConnection {
     // Per ACP spec: "The Agent can update the list of available commands at any time"
     // Note: We'll only send notifications for active sessions
     this.slashCommandsRegistry.onChange(() => {
-      // When commands change, we could send updates to all active sessions
-      // For now, updates will be sent via explicit calls to sendAvailableCommandsUpdate
-      this.logger.debug('Slash commands updated, ready to notify sessions');
+      // When commands change, send updates to all active sessions
+      this.sessionManager.listSessions().then(result => {
+        result.items.forEach(session => {
+          this.sendAvailableCommandsUpdate(session.id);
+        });
+      });
+      this.logger.debug('Slash commands updated, notified all active sessions');
     });
 
     // Initialize PermissionsHandler
