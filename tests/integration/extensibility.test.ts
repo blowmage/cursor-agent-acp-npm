@@ -371,7 +371,6 @@ describe('Extensibility Integration', () => {
       const meta = initResult.agentCapabilities._meta as any;
       if (meta) {
         // Ensure no extension namespaces are present (they would start with lowercase)
-        const keys = Object.keys(meta).filter((k) => k.match(/^[a-z]/));
         // We might have some metadata but no extension namespaces
         expect(meta).toBeDefined();
       }
