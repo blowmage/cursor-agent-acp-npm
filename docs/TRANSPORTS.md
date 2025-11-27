@@ -94,7 +94,7 @@ Each message is followed by a newline character (`\n`).
 #### Response Example
 
 ```json
-{"jsonrpc":"2.0","id":1,"result":{"agreedProtocolVersion":1,"agentInfo":{"name":"cursor-agent-acp","version":"0.2.0"}}}
+{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentInfo":{"name":"cursor-agent-acp","version":"0.2.0"}}}
 ```
 
 #### Notification Example (No ID)
