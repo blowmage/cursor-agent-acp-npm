@@ -1385,7 +1385,9 @@ describe('Prompt Turn Integration Tests', () => {
       });
 
       expect(response.error).toBeDefined();
-      expect(response.error?.message).toContain('content');
+      expect(response.error?.message).toContain(
+        'prompt is required and must be a non-empty array'
+      );
     });
 
     it('should reject session/prompt with non-existent session', async () => {

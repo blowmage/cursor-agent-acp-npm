@@ -5,10 +5,21 @@
  * Agents request terminals from the client, which manages actual execution.
  *
  * Per ACP spec: https://agentclientprotocol.com/protocol/terminals
+ * Per ACP schema: https://agentclientprotocol.com/protocol/schema#terminal
+ *
+ * SDK Types Used:
+ * - CreateTerminalRequest: Request to create a new terminal
+ * - CreateTerminalResponse: Response with terminal ID and metadata
+ * - TerminalHandle: Handle for interacting with terminal
+ * - Terminal: Content type for terminal output in tool calls
+ * - TerminalExitStatus: Exit status of completed commands
+ * - EnvVariable: Environment variable definition
+ *
+ * Protocol Flow:
  * - Terminals are client-provided capabilities
- * - Agent requests terminals via terminal/create
- * - Client manages process execution
- * - Agent controls via TerminalHandle
+ * - Agent requests terminals via terminal/create (client method)
+ * - Client manages process execution and returns TerminalHandle
+ * - Agent controls via TerminalHandle methods (write, kill, waitForExit, release)
  */
 
 import type {

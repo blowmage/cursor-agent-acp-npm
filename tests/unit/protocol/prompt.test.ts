@@ -100,13 +100,15 @@ describe('PromptHandler', () => {
   });
 
   describe('processPrompt', () => {
+    // Per ACP schema: https://agentclientprotocol.com/protocol/schema#promptrequest
+    // The field name is 'prompt' (ContentBlock[]), not 'content'
     const validRequest: AcpRequest = {
       jsonrpc: '2.0',
       method: 'session/prompt',
       id: 'test-request-1',
       params: {
         sessionId: 'test-session-1',
-        content: [
+        prompt: [
           {
             type: 'text',
             text: 'Hello, how can you help me with TypeScript?',
@@ -114,6 +116,23 @@ describe('PromptHandler', () => {
         ],
         stream: false,
         metadata: { source: 'test' },
+      },
+    };
+
+    // Also test backward compatibility with 'content' field
+    const legacyRequest: AcpRequest = {
+      jsonrpc: '2.0',
+      method: 'session/prompt',
+      id: 'test-request-2',
+      params: {
+        sessionId: 'test-session-1',
+        content: [
+          {
+            type: 'text',
+            text: 'Legacy content field',
+          },
+        ],
+        stream: false,
       },
     };
 
@@ -170,8 +189,36 @@ describe('PromptHandler', () => {
 
         expect(userMessageCall[0]).toBe('test-session-1');
         expect(userMessageCall[1].role).toBe('user');
-        expect(userMessageCall[1].content).toEqual(validRequest.params.content);
+        // Per ACP schema: PromptRequest uses 'prompt' field
+        expect(userMessageCall[1].content).toEqual(validRequest.params.prompt);
         expect(userMessageCall[1].metadata).toEqual({ source: 'test' });
+      });
+
+      it('should support legacy content field for backward compatibility', async () => {
+        mockSessionManager.loadSession.mockResolvedValue({
+          id: 'test-session-1',
+          metadata: { name: 'Test Session' },
+          conversation: [],
+          state: { lastActivity: new Date(), messageCount: 0 },
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+
+        const response = await promptHandler.processPrompt(legacyRequest);
+
+        expect(response.jsonrpc).toBe('2.0');
+        expect(response.id).toBe('test-request-2');
+        expect(response.error).toBeUndefined();
+
+        // Wait for async processing
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        const addMessageCalls = mockSessionManager.addMessage.mock.calls;
+        const userMessageCall = addMessageCalls[0];
+
+        expect(userMessageCall[1].content).toEqual(
+          legacyRequest.params.content
+        );
       });
 
       it('should add assistant message to session', async () => {
@@ -355,7 +402,7 @@ describe('PromptHandler', () => {
 
         expect(response.error).toBeDefined();
         expect(response.error?.message).toContain(
-          'content/prompt is required and must be a non-empty array'
+          'prompt is required and must be a non-empty array'
         );
       });
 

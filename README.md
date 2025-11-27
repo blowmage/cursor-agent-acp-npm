@@ -9,14 +9,16 @@ This TypeScript implementation provides a production-ready bridge between the Cu
 ## Features
 
 - **ACP Protocol Core** - Initialize, session management, prompt processing
+- **Strict Schema Compliance** - 100% adherence to [ACP Schema](https://agentclientprotocol.com/protocol/schema)
 - **Stdio Transport** - Standard ACP stdio transport per protocol specification
 - **Session Management** - Persistent sessions with metadata and history
-- **Content Processing** - Text, code, and image block handling
+- **Content Processing** - Text, code, and image block handling per ContentBlock schema
 - **Real-time Streaming** - Live response streaming for immediate feedback
 - **Complete Tool System** - Filesystem, terminal, and Cursor-specific tools
 - **Security Framework** - Path validation, command filtering, access controls
 - **Error Handling & Recovery** - Robust error handling with comprehensive validation
 - **Type Safety** - Written in TypeScript with strict type checking using `@agentclientprotocol/sdk`
+- **SDK Integration** - All protocol types imported from official `@agentclientprotocol/sdk`
 - **Test Coverage** - 200+ unit and integration tests with security coverage
 - **Cursor CLI Integration** - Complete integration with cursor-agent CLI features
 - **Advanced Tool Registry** - Dynamic provider management and validation
@@ -24,6 +26,29 @@ This TypeScript implementation provides a production-ready bridge between the Cu
 - **High Performance** - <100ms average response time optimization
 - **Memory Efficiency** - Zero memory leaks, optimal resource usage
 - **Cross-platform** - Works on macOS, Linux, and Windows
+
+## ACP Schema Compliance
+
+This adapter strictly adheres to the [Agent Client Protocol Schema](https://agentclientprotocol.com/protocol/schema). Key compliance features:
+
+### Protocol Types
+- **All types imported from `@agentclientprotocol/sdk`** - No custom protocol type definitions
+- **PromptRequest** - Uses `prompt` field per schema (ContentBlock[])
+- **SessionUpdate** - Full union type support (user_message_chunk, agent_message_chunk, agent_thought_chunk, tool_call, tool_call_update, plan, available_commands_update, current_mode_update)
+- **ContentBlock** - Complete support for text, image, audio, resource, resource_link
+- **SessionCapabilities** - Properly declared in AgentCapabilities
+- **Terminal types** - Full Terminal, TerminalHandle, TerminalExitStatus support
+
+### Validation
+- **Content block validation** - Strict validation against ContentBlock schema
+- **Annotations support** - Full Annotations type support with _meta extensions
+- **Error responses** - JSON-RPC 2.0 compliant error structures
+- **Type guards** - Runtime validation using SDK type structures
+
+### Documentation
+- **TSDoc comments** - All protocol methods link to ACP schema documentation
+- **Schema references** - Direct links to relevant schema sections
+- **Internal vs Protocol types** - Clear separation and documentation
 
 ## Installation
 

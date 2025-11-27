@@ -41,7 +41,7 @@ describe('InitializationHandler', () => {
       // Act
       const result = await handler.initialize(params);
 
-      // Assert
+      // Assert - Basic response structure
       expect(result).toBeValidAcpResponse();
       expect(result.protocolVersion).toBe(TEST_CONSTANTS.ACP_PROTOCOL_VERSION);
       expect(result.agentInfo).toEqual({
@@ -51,10 +51,23 @@ describe('InitializationHandler', () => {
       });
 
       // Verify all required capabilities are declared per ACP spec
+      // Per ACP schema: https://agentclientprotocol.com/protocol/schema#agentcapabilities
       expect(result.agentCapabilities).toBeDefined();
       expect(result.agentCapabilities.loadSession).toBe(true);
       expect(result.agentCapabilities.promptCapabilities).toBeDefined();
       expect(result.agentCapabilities.mcpCapabilities).toBeDefined(); // Per ACP spec: use "mcpCapabilities"
+
+      // Per ACP schema: SessionCapabilities should be included
+      // https://agentclientprotocol.com/protocol/schema#sessioncapabilities
+      expect(result.agentCapabilities.sessionCapabilities).toBeDefined();
+      expect(result.agentCapabilities.sessionCapabilities._meta).toBeDefined();
+      expect(
+        result.agentCapabilities.sessionCapabilities._meta.supportsSessionModes
+      ).toBe(true);
+      expect(
+        result.agentCapabilities.sessionCapabilities._meta.supportsSetMode
+      ).toBe(true);
+
       expect(result.authMethods).toEqual([]);
     });
 

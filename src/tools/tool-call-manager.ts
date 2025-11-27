@@ -29,7 +29,14 @@ import {
 
 /**
  * Internal tracking info for active tool calls
- * Note: We store SDK-compliant notification structure
+ *
+ * Note: This is an internal implementation type for tracking tool call state.
+ * For protocol-level types, see:
+ * - Per ACP schema: https://agentclientprotocol.com/protocol/schema#toolcall
+ * - SDK types: ToolCall, ToolCallUpdate, ToolCallStatus, SessionNotification
+ *
+ * This manager uses SDK-compliant SessionNotification structures for
+ * all protocol communications while maintaining internal state here.
  */
 export interface ToolCallInfo {
   toolCallId: string;
@@ -38,7 +45,7 @@ export interface ToolCallInfo {
   status: ToolCallStatus;
   startTime: Date;
   endTime?: Date;
-  // Store the last notification sent for this tool call
+  // Store the last SDK-compliant notification sent for this tool call
   lastNotification: SessionNotification;
   cleanupTimeoutId?: NodeJS.Timeout;
 }

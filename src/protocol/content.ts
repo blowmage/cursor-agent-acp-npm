@@ -1,8 +1,14 @@
 /**
  * Content Processing Module
  *
- * Handles processing of different content types (text, code, image) for ACP protocol.
+ * Handles processing of different content types for ACP protocol.
  * Manages content transformation between ACP format and Cursor CLI format.
+ *
+ * Per ACP schema: https://agentclientprotocol.com/protocol/schema#contentblock
+ * ContentBlock union types: text | image | audio | resource | resource_link
+ *
+ * Note: 'diff' and 'terminal' are NOT ContentBlock types - they are ToolCallContent types.
+ * Per ACP schema: https://agentclientprotocol.com/protocol/schema#toolcallcontent
  */
 
 import type { ContentBlock } from '@agentclientprotocol/sdk';
@@ -787,6 +793,16 @@ export class ContentProcessor {
 
   /**
    * Validate content blocks
+   * Per ACP schema: https://agentclientprotocol.com/protocol/schema#contentblock
+   *
+   * Validates that all blocks conform to the ContentBlock union type:
+   * - text: ContentBlock with { type: 'text', text: string }
+   * - image: ContentBlock with { type: 'image', data: string, mimeType: string, uri?: string | null }
+   * - audio: ContentBlock with { type: 'audio', data: string, mimeType: string }
+   * - resource: ContentBlock with { type: 'resource', resource: EmbeddedResourceResource }
+   * - resource_link: ContentBlock with { type: 'resource_link', uri: string, name: string, ... }
+   *
+   * @returns Validation result with list of errors (empty if valid)
    */
   validateContentBlocks(blocks: ContentBlock[]): {
     valid: boolean;
