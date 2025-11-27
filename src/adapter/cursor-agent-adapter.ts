@@ -522,13 +522,13 @@ export class CursorAgentAdapter implements ClientConnection {
           result.items.forEach((session) => {
             this.sendAvailableCommandsUpdate(session.id);
           });
+          this.logger.debug('Slash commands updated, notified all active sessions');
         })
         .catch((error) => {
           this.logger.warn('Failed to send command updates to sessions', {
             error,
           });
         });
-      this.logger.debug('Slash commands updated, notified all active sessions');
     });
 
     // Initialize PermissionsHandler
