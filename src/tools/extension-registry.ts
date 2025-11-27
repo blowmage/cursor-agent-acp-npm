@@ -36,6 +36,8 @@
  * - Use namespaces to avoid conflicts (e.g., `_myapp/method`)
  * - Follow format: `_namespace/name`
  *
+ * Note: Extensions registered without a namespace (i.e., without a slash) will not be advertised in capabilities.
+ *
  * ## Invocation from Clients
  *
  * Clients invoke extension methods via JSON-RPC:
