@@ -34,6 +34,7 @@ import {
   type ReadTextFileResponse,
   type WriteTextFileRequest,
   type WriteTextFileResponse,
+  type ExtMethodResponse,
 } from '@agentclientprotocol/sdk';
 import type { Error as JsonRpcError } from '@agentclientprotocol/sdk';
 import { CursorAgentImplementation } from './agent-implementation';
@@ -62,6 +63,7 @@ import type { ClientConnection } from '../client/client-connection';
 import { AcpFileSystemClient } from '../client/filesystem-client';
 import { FilesystemToolProvider } from '../tools/filesystem';
 import { SlashCommandsRegistry } from '../tools/slash-commands';
+import { ExtensionRegistry } from '../tools/extension-registry';
 
 export class CursorAgentAdapter implements ClientConnection {
   private config: AdapterConfig;
@@ -78,6 +80,7 @@ export class CursorAgentAdapter implements ClientConnection {
   private initializationHandler?: InitializationHandler;
   private promptHandler?: PromptHandler;
   private slashCommandsRegistry?: SlashCommandsRegistry;
+  private extensionRegistry?: ExtensionRegistry;
 
   // ACP-compliant file system client
   private fileSystemClient?: AcpFileSystemClient;
@@ -423,6 +426,10 @@ export class CursorAgentAdapter implements ClientConnection {
           return await this.handleToolCall(request);
 
         default:
+          // Per ACP spec: Check if this is an extension method (starts with _)
+          if (request.method.startsWith('_')) {
+            return await this.handleExtensionMethod(request);
+          }
           throw new ProtocolError(`Unknown method: ${request.method}`);
       }
     } catch (error) {
@@ -504,6 +511,9 @@ export class CursorAgentAdapter implements ClientConnection {
     this.slashCommandsRegistry = new SlashCommandsRegistry(this.logger);
     this.registerDefaultCommands();
 
+    // Initialize ExtensionRegistry
+    this.extensionRegistry = new ExtensionRegistry(this.logger);
+
     // Set up onChange callback to send available_commands_update notifications
     // Per ACP spec: "The Agent can update the list of available commands at any time"
     // Note: We'll only send notifications for active sessions
@@ -561,6 +571,11 @@ export class CursorAgentAdapter implements ClientConnection {
       this.config,
       this.logger
     );
+
+    // Set extension registry getter for advertising custom capabilities
+    this.initializationHandler.setExtensionRegistryGetter(() => {
+      return this.extensionRegistry;
+    });
 
     this.promptHandler = new PromptHandler({
       sessionManager: this.sessionManager,
@@ -1960,5 +1975,101 @@ export class CursorAgentAdapter implements ClientConnection {
     }
 
     this.logger.debug('Cleanup completed');
+  }
+
+  /**
+   * Handle extension method request
+   * Per ACP spec: Extension methods start with underscore and follow JSON-RPC 2.0 semantics
+   *
+   * @param request - The extension method request
+   * @returns JSON-RPC response with result or error
+   */
+  private async handleExtensionMethod(request: Request | Request1): Promise<{
+    jsonrpc: '2.0';
+    id: string | number | null;
+    result?: ExtMethodResponse | null;
+    error?: JsonRpcError;
+  }> {
+    if (!this.extensionRegistry) {
+      this.logger.warn('Extension registry not initialized');
+      return {
+        jsonrpc: '2.0',
+        id: request.id,
+        error: {
+          code: -32601,
+          message: 'Method not found',
+        },
+      };
+    }
+
+    const methodName = request.method;
+    const params = (request.params as Record<string, unknown>) || {};
+
+    // Check if method is registered
+    if (!this.extensionRegistry.hasMethod(methodName)) {
+      this.logger.debug('Extension method not found', { method: methodName });
+      return {
+        jsonrpc: '2.0',
+        id: request.id,
+        error: {
+          code: -32601,
+          message: 'Method not found',
+        },
+      };
+    }
+
+    try {
+      // Call the extension method
+      const result = await this.extensionRegistry.callMethod(
+        methodName,
+        params
+      );
+
+      return {
+        jsonrpc: '2.0',
+        id: request.id,
+        result: result as ExtMethodResponse,
+      };
+    } catch (error) {
+      this.logger.error('Extension method execution failed', {
+        method: methodName,
+        error,
+      });
+
+      // Return proper JSON-RPC error
+      const errorData: Record<string, unknown> | undefined =
+        error instanceof Error
+          ? {
+              name: error.name,
+              ...(error.stack && { stack: error.stack }),
+            }
+          : undefined;
+
+      return {
+        jsonrpc: '2.0',
+        id: request.id,
+        error: {
+          code: -32603,
+          message: error instanceof Error ? error.message : 'Internal error',
+          ...(errorData && { data: errorData }),
+        },
+      };
+    }
+  }
+
+  /**
+   * Get the extension registry
+   * Per ACP spec: Provides access to register extension methods and notifications
+   *
+   * @returns ExtensionRegistry instance
+   */
+  getExtensionRegistry(): ExtensionRegistry {
+    if (!this.extensionRegistry) {
+      throw new AdapterError(
+        'Extension registry not initialized',
+        'COMPONENT_ERROR'
+      );
+    }
+    return this.extensionRegistry;
   }
 }

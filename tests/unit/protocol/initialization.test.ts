@@ -1177,4 +1177,160 @@ describe('InitializationHandler', () => {
       );
     });
   });
+
+  describe('extension capabilities advertising', () => {
+    it('should advertise registered extension methods in _meta', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      jest.spyOn(handler as any, 'testCursorConnectivity').mockResolvedValue({
+        success: true,
+        authenticated: true,
+      });
+
+      // Mock extension registry getter
+      const mockRegistry = {
+        getRegisteredMethods: jest
+          .fn()
+          .mockReturnValue(['_test/method1', '_test/method2', '_other/method']),
+        getRegisteredNotifications: jest.fn().mockReturnValue([]),
+      };
+
+      handler.setExtensionRegistryGetter(() => mockRegistry);
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert
+      expect(result.agentCapabilities._meta).toBeDefined();
+      expect(result.agentCapabilities._meta?.test).toBeDefined();
+      expect(result.agentCapabilities._meta?.test?.methods).toEqual([
+        '_test/method1',
+        '_test/method2',
+      ]);
+      expect(result.agentCapabilities._meta?.other?.methods).toEqual([
+        '_other/method',
+      ]);
+    });
+
+    it('should advertise registered extension notifications in _meta', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      jest.spyOn(handler as any, 'testCursorConnectivity').mockResolvedValue({
+        success: true,
+        authenticated: true,
+      });
+
+      const mockRegistry = {
+        getRegisteredMethods: jest.fn().mockReturnValue([]),
+        getRegisteredNotifications: jest
+          .fn()
+          .mockReturnValue(['_test/notification1', '_test/notification2']),
+      };
+
+      handler.setExtensionRegistryGetter(() => mockRegistry);
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert
+      expect(result.agentCapabilities._meta?.test).toBeDefined();
+      expect(result.agentCapabilities._meta?.test?.notifications).toEqual([
+        '_test/notification1',
+        '_test/notification2',
+      ]);
+    });
+
+    it('should group methods and notifications by namespace', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      jest.spyOn(handler as any, 'testCursorConnectivity').mockResolvedValue({
+        success: true,
+        authenticated: true,
+      });
+
+      const mockRegistry = {
+        getRegisteredMethods: jest
+          .fn()
+          .mockReturnValue(['_namespace/method1', '_namespace/method2']),
+        getRegisteredNotifications: jest
+          .fn()
+          .mockReturnValue(['_namespace/notification']),
+      };
+
+      handler.setExtensionRegistryGetter(() => mockRegistry);
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert
+      expect(result.agentCapabilities._meta?.namespace).toBeDefined();
+      expect(result.agentCapabilities._meta?.namespace?.methods).toHaveLength(
+        2
+      );
+      expect(
+        result.agentCapabilities._meta?.namespace?.notifications
+      ).toHaveLength(1);
+    });
+
+    it('should not include extension capabilities if none registered', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      jest.spyOn(handler as any, 'testCursorConnectivity').mockResolvedValue({
+        success: true,
+        authenticated: true,
+      });
+
+      const mockRegistry = {
+        getRegisteredMethods: jest.fn().mockReturnValue([]),
+        getRegisteredNotifications: jest.fn().mockReturnValue([]),
+      };
+
+      handler.setExtensionRegistryGetter(() => mockRegistry);
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert - should still have _meta but no extension namespaces
+      expect(result.agentCapabilities._meta).toBeDefined();
+      // Standard _meta fields should still be present
+      expect(result.agentCapabilities._meta?.implementation).toBe(
+        'cursor-agent-acp-npm'
+      );
+    });
+
+    it('should handle undefined extension registry gracefully', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      jest.spyOn(handler as any, 'testCursorConnectivity').mockResolvedValue({
+        success: true,
+        authenticated: true,
+      });
+
+      handler.setExtensionRegistryGetter(() => undefined);
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert - should not crash and should still have standard _meta
+      expect(result.agentCapabilities._meta).toBeDefined();
+      expect(result.agentCapabilities._meta?.implementation).toBe(
+        'cursor-agent-acp-npm'
+      );
+    });
+  });
 });
