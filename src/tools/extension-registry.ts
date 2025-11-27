@@ -34,9 +34,11 @@
  * Per ACP spec, extension names MUST:
  * - Start with underscore (_)
  * - Use namespaces to avoid conflicts (e.g., `_myapp/method`)
- * - Follow format: `_namespace/name`
+ * - Follow format: `_namespace/name` or `_name` (without slash)
  *
- * Note: Extensions registered without a namespace (i.e., without a slash) will not be advertised in capabilities.
+ * Extension names are advertised in capabilities as follows:
+ * - `_namespace/method` → `_meta.namespace.methods`
+ * - `_method` (no slash) → `_meta.method.methods` (method name used as namespace)
  *
  * ## Invocation from Clients
  *

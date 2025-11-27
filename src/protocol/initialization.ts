@@ -788,33 +788,37 @@ export class InitializationHandler {
     }
 
     // Group methods and notifications by namespace
-    // Example: "_namespace/method" -> namespace: "namespace"
+    // Per ACP spec: Extension names start with underscore
+    // Examples: "_namespace/method" -> "namespace", "_method" -> uses the name itself as namespace
     const namespaces = new Map<
       string,
       { methods: string[]; notifications: string[] }
     >();
 
     for (const method of methods) {
-      // Extract namespace from method name (e.g., "_namespace/method" -> "namespace")
+      // Extract namespace from method name
+      // "_namespace/method" -> namespace = "namespace"
+      // "_method" -> namespace = "method" (no slash, so entire name after underscore is the namespace)
       const match = method.match(/^_([^/]+)/);
-      if (match) {
-        const namespace = match[1]!;
-        if (!namespaces.has(namespace)) {
-          namespaces.set(namespace, { methods: [], notifications: [] });
-        }
-        namespaces.get(namespace)!.methods.push(method);
+      const namespace = match ? match[1]! : 'default';
+
+      if (!namespaces.has(namespace)) {
+        namespaces.set(namespace, { methods: [], notifications: [] });
       }
+      namespaces.get(namespace)!.methods.push(method);
     }
 
     for (const notification of notifications) {
+      // Extract namespace from notification name
+      // "_namespace/event" -> namespace = "namespace"
+      // "_event" -> namespace = "event" (no slash, so entire name after underscore is the namespace)
       const match = notification.match(/^_([^/]+)/);
-      if (match) {
-        const namespace = match[1]!;
-        if (!namespaces.has(namespace)) {
-          namespaces.set(namespace, { methods: [], notifications: [] });
-        }
-        namespaces.get(namespace)!.notifications.push(notification);
+      const namespace = match ? match[1]! : 'default';
+
+      if (!namespaces.has(namespace)) {
+        namespaces.set(namespace, { methods: [], notifications: [] });
       }
+      namespaces.get(namespace)!.notifications.push(notification);
     }
 
     // Build capabilities object

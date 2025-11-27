@@ -332,6 +332,37 @@ describe('CursorAgentAdapter - Extensibility', () => {
       expect(capabilities?._meta?.namespace?.notifications).toHaveLength(1);
     });
 
+    it('should handle extension methods without slash separator', async () => {
+      const registry = adapter.getExtensionRegistry();
+
+      // Register methods without namespace separator (just underscore prefix)
+      registry.registerMethod('_simplemethod', jest.fn());
+      registry.registerNotification('_simpleevent', jest.fn());
+
+      const request = {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: {
+          protocolVersion: 1,
+          clientInfo: { name: 'test', version: '1.0.0' },
+        },
+      } as Request;
+
+      const response = await adapter.processRequest(request);
+      const capabilities = (response.result as any)?.agentCapabilities;
+
+      // Extension names without slashes use the name itself as the namespace
+      expect(capabilities?._meta?.simplemethod).toBeDefined();
+      expect(capabilities?._meta?.simplemethod?.methods).toContain(
+        '_simplemethod'
+      );
+      expect(capabilities?._meta?.simpleevent).toBeDefined();
+      expect(capabilities?._meta?.simpleevent?.notifications).toContain(
+        '_simpleevent'
+      );
+    });
+
     it('should not include extension capabilities if none registered', async () => {
       const request: Request = {
         jsonrpc: '2.0',
