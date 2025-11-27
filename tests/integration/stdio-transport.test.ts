@@ -112,7 +112,7 @@ describe('Stdio Transport Integration Tests', () => {
       // Verify result structure per ACP spec (using InitializeResponse type from SDK)
       const result = response.result as InitializeResponse;
 
-      // SDK uses 'protocolVersion' not 'agreedProtocolVersion' in the response
+      // The SDK response includes 'protocolVersion' as expected
       expect(result.protocolVersion).toBe(1);
       expect(result.agentCapabilities).toBeDefined();
       expect(result.agentInfo).toBeDefined();
