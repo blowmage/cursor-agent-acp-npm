@@ -9,6 +9,7 @@ export { CursorAgentAdapter } from './adapter/cursor-agent-adapter';
 export { SessionManager } from './session/manager';
 export { CursorCliBridge } from './cursor/cli-bridge';
 export { ToolRegistry } from './tools/registry';
+export { SlashCommandsRegistry } from './tools/slash-commands';
 
 // Type exports
 export type {

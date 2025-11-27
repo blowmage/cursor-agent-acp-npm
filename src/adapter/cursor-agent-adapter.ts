@@ -314,6 +314,61 @@ export class CursorAgentAdapter implements ClientConnection {
   }
 
   /**
+   * Get the slash commands registry
+   * Per ACP spec: Provides access to register and manage slash commands
+   *
+   * @returns SlashCommandsRegistry instance
+   *
+   * @example
+   * ```typescript
+   * const registry = adapter.getSlashCommandsRegistry();
+   * registry.registerCommand('web', 'Search the web', 'query');
+   * ```
+   */
+  getSlashCommandsRegistry(): SlashCommandsRegistry {
+    if (!this.slashCommandsRegistry) {
+      throw new AdapterError(
+        'Slash commands registry not initialized',
+        'COMPONENT_ERROR'
+      );
+    }
+    return this.slashCommandsRegistry;
+  }
+
+  /**
+   * Update available commands for a session
+   * Per ACP spec: Sends available_commands_update notification dynamically
+   *
+   * @param sessionId - The session ID to send the update to
+   *
+   * @example
+   * ```typescript
+   * // Update commands dynamically during a session
+   * adapter.updateAvailableCommands(sessionId);
+   * ```
+   */
+  updateAvailableCommands(sessionId: string): void {
+    if (!this.sessionManager) {
+      throw new AdapterError(
+        'Session manager not initialized',
+        'COMPONENT_ERROR'
+      );
+    }
+
+    // Verify session exists
+    const session = this.sessionManager['sessions'].get(sessionId);
+    if (!session) {
+      this.logger.warn('Cannot update commands for non-existent session', {
+        sessionId,
+      });
+      return;
+    }
+
+    // Send the update
+    this.sendAvailableCommandsUpdate(sessionId);
+  }
+
+  /**
    * Process ACP request and return response
    */
   async processRequest(request: Request | Request1): Promise<{
@@ -449,6 +504,15 @@ export class CursorAgentAdapter implements ClientConnection {
     // Initialize SlashCommandsRegistry
     this.slashCommandsRegistry = new SlashCommandsRegistry(this.logger);
     this.registerDefaultCommands();
+
+    // Set up onChange callback to send available_commands_update notifications
+    // Per ACP spec: "The Agent can update the list of available commands at any time"
+    // Note: We'll only send notifications for active sessions
+    this.slashCommandsRegistry.onChange(() => {
+      // When commands change, we could send updates to all active sessions
+      // For now, updates will be sent via explicit calls to sendAvailableCommandsUpdate
+      this.logger.debug('Slash commands updated, ready to notify sessions');
+    });
 
     // Initialize PermissionsHandler
     this.permissionsHandler = new PermissionsHandler({
