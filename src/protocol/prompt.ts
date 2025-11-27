@@ -1463,7 +1463,7 @@ export class PromptHandler {
     // Per JSON-RPC 2.0: params must be an object (not array/primitive)
     if (!params || typeof params !== 'object' || Array.isArray(params)) {
       throw new ProtocolError(
-        `Invalid prompt parameters: expected object, got ${Array.isArray(params) ? 'array' : typeof params}`
+        `Invalid prompt parameters: expected object, got ${params === null ? 'null' : Array.isArray(params) ? 'array' : typeof params}`
       );
     }
 
