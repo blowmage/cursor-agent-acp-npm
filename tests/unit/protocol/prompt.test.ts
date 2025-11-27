@@ -15,6 +15,7 @@ import type {
   AdapterConfig,
 } from '../../../src/types';
 import { ProtocolError, SessionError } from '../../../src/types';
+import type { PlanEntry, SessionNotification } from '@agentclientprotocol/sdk';
 
 // Mock dependencies
 const mockSessionManager = {
@@ -663,6 +664,486 @@ describe('PromptHandler', () => {
       expect(sendPromptCall.content.value).toContain('# Type: text/typescript');
       expect(sendPromptCall.content.value).toContain('const x = 42;');
       expect(sendPromptCall.content.value).toContain('What do you think?');
+    });
+  });
+
+  describe('sendPlan', () => {
+    let sentNotifications: Array<{
+      jsonrpc: '2.0';
+      method: string;
+      params?: any;
+    }>;
+    let handlerWithNotifications: PromptHandler;
+
+    beforeEach(() => {
+      sentNotifications = [];
+      handlerWithNotifications = new PromptHandler({
+        sessionManager: mockSessionManager as any,
+        cursorBridge: mockCursorBridge as any,
+        config: mockConfig,
+        logger: mockLogger,
+        sendNotification: (notification) => {
+          sentNotifications.push(notification);
+        },
+      });
+    });
+
+    it('should not send notification when sendPlan is disabled', () => {
+      const entries: PlanEntry[] = [
+        {
+          content: 'Analyze the codebase',
+          priority: 'high',
+          status: 'pending',
+        },
+      ];
+
+      handlerWithNotifications.sendPlan('session1', entries);
+
+      expect(sentNotifications).toHaveLength(0);
+      expect(mockLogger.debug).not.toHaveBeenCalled();
+    });
+
+    it('should not send notification when entries array is empty', () => {
+      // Enable sendPlan for this test
+      (handlerWithNotifications as any).processingConfig.sendPlan = true;
+
+      handlerWithNotifications.sendPlan('session1', []);
+
+      expect(sentNotifications).toHaveLength(0);
+      expect(mockLogger.debug).not.toHaveBeenCalled();
+    });
+
+    it('should send plan notification with correct structure when enabled', () => {
+      // Enable sendPlan for this test
+      (handlerWithNotifications as any).processingConfig.sendPlan = true;
+
+      const entries: PlanEntry[] = [
+        {
+          content: 'Analyze the existing codebase structure',
+          priority: 'high',
+          status: 'pending',
+        },
+        {
+          content: 'Identify components that need refactoring',
+          priority: 'high',
+          status: 'pending',
+        },
+        {
+          content: 'Create unit tests for critical functions',
+          priority: 'medium',
+          status: 'pending',
+        },
+      ];
+
+      handlerWithNotifications.sendPlan('session1', entries);
+
+      expect(sentNotifications).toHaveLength(1);
+      expect(sentNotifications[0]!).toMatchObject({
+        jsonrpc: '2.0',
+        method: 'session/update',
+        params: {
+          sessionId: 'session1',
+          update: {
+            sessionUpdate: 'plan',
+            entries: [
+              {
+                content: 'Analyze the existing codebase structure',
+                priority: 'high',
+                status: 'pending',
+              },
+              {
+                content: 'Identify components that need refactoring',
+                priority: 'high',
+                status: 'pending',
+              },
+              {
+                content: 'Create unit tests for critical functions',
+                priority: 'medium',
+                status: 'pending',
+              },
+            ],
+          },
+        },
+      });
+
+      // Verify SessionNotification type structure
+      const notification = sentNotifications[0]!.params as SessionNotification;
+      expect(notification.sessionId).toBe('session1');
+      expect(notification.update.sessionUpdate).toBe('plan');
+      expect('entries' in notification.update).toBe(true);
+      if ('entries' in notification.update) {
+        expect(notification.update.entries).toHaveLength(3);
+      }
+
+      expect(mockLogger.debug).toHaveBeenCalledWith('Sending plan', {
+        sessionId: 'session1',
+        stepCount: 3,
+      });
+    });
+
+    it('should include _meta field when present in entries', () => {
+      // Enable sendPlan for this test
+      (handlerWithNotifications as any).processingConfig.sendPlan = true;
+
+      const entries: PlanEntry[] = [
+        {
+          content: 'Task with metadata',
+          priority: 'high',
+          status: 'pending',
+          _meta: {
+            source: 'test',
+            timestamp: '2024-01-01T00:00:00Z',
+          },
+        },
+        {
+          content: 'Task without metadata',
+          priority: 'low',
+          status: 'completed',
+        },
+      ];
+
+      handlerWithNotifications.sendPlan('session1', entries);
+
+      expect(sentNotifications).toHaveLength(1);
+      const notification = sentNotifications[0]!.params as SessionNotification;
+      if ('entries' in notification.update) {
+        expect(notification.update.entries[0]!._meta).toEqual({
+          source: 'test',
+          timestamp: '2024-01-01T00:00:00Z',
+        });
+        expect(notification.update.entries[1]!._meta).toBeUndefined();
+      }
+    });
+
+    it('should map all required fields correctly', () => {
+      // Enable sendPlan for this test
+      (handlerWithNotifications as any).processingConfig.sendPlan = true;
+
+      const entries: PlanEntry[] = [
+        {
+          content: 'Test content',
+          priority: 'high',
+          status: 'in_progress',
+        },
+        {
+          content: 'Another task',
+          priority: 'medium',
+          status: 'completed',
+        },
+        {
+          content: 'Low priority task',
+          priority: 'low',
+          status: 'pending',
+        },
+      ];
+
+      handlerWithNotifications.sendPlan('session1', entries);
+
+      expect(sentNotifications).toHaveLength(1);
+      const notification = sentNotifications[0]!.params as SessionNotification;
+      if ('entries' in notification.update) {
+        const mappedEntries = notification.update.entries;
+        expect(mappedEntries).toHaveLength(3);
+
+        // Verify all required fields are present
+        mappedEntries.forEach((entry) => {
+          expect(entry).toHaveProperty('content');
+          expect(entry).toHaveProperty('priority');
+          expect(entry).toHaveProperty('status');
+          expect(typeof entry.content).toBe('string');
+          expect(['high', 'medium', 'low']).toContain(entry.priority);
+          expect(['pending', 'in_progress', 'completed']).toContain(
+            entry.status
+          );
+        });
+
+        // Verify no invalid fields are present
+        mappedEntries.forEach((entry) => {
+          expect(entry).not.toHaveProperty('id');
+          expect(entry).not.toHaveProperty('title');
+          expect(entry).not.toHaveProperty('description');
+        });
+      }
+    });
+
+    it('should handle all valid status values', () => {
+      // Enable sendPlan for this test
+      (handlerWithNotifications as any).processingConfig.sendPlan = true;
+
+      const entries: PlanEntry[] = [
+        { content: 'Pending task', priority: 'high', status: 'pending' },
+        {
+          content: 'In progress task',
+          priority: 'medium',
+          status: 'in_progress',
+        },
+        { content: 'Completed task', priority: 'low', status: 'completed' },
+      ];
+
+      handlerWithNotifications.sendPlan('session1', entries);
+
+      expect(sentNotifications).toHaveLength(1);
+      const notification = sentNotifications[0]!.params as SessionNotification;
+      if ('entries' in notification.update) {
+        expect(notification.update.entries[0]!.status).toBe('pending');
+        expect(notification.update.entries[1]!.status).toBe('in_progress');
+        expect(notification.update.entries[2]!.status).toBe('completed');
+      }
+    });
+
+    it('should handle all valid priority values', () => {
+      // Enable sendPlan for this test
+      (handlerWithNotifications as any).processingConfig.sendPlan = true;
+
+      const entries: PlanEntry[] = [
+        { content: 'High priority', priority: 'high', status: 'pending' },
+        { content: 'Medium priority', priority: 'medium', status: 'pending' },
+        { content: 'Low priority', priority: 'low', status: 'pending' },
+      ];
+
+      handlerWithNotifications.sendPlan('session1', entries);
+
+      expect(sentNotifications).toHaveLength(1);
+      const notification = sentNotifications[0]!.params as SessionNotification;
+      if ('entries' in notification.update) {
+        expect(notification.update.entries[0]!.priority).toBe('high');
+        expect(notification.update.entries[1]!.priority).toBe('medium');
+        expect(notification.update.entries[2]!.priority).toBe('low');
+      }
+    });
+  });
+
+  describe('updatePlan', () => {
+    let sentNotifications: Array<{
+      jsonrpc: '2.0';
+      method: string;
+      params?: any;
+    }>;
+    let handlerWithNotifications: PromptHandler;
+
+    beforeEach(() => {
+      sentNotifications = [];
+      handlerWithNotifications = new PromptHandler({
+        sessionManager: mockSessionManager as any,
+        cursorBridge: mockCursorBridge as any,
+        config: mockConfig,
+        logger: mockLogger,
+        sendNotification: (notification) => {
+          sentNotifications.push(notification);
+        },
+      });
+    });
+
+    it('should not send notification when sendPlan is disabled', () => {
+      const entries: PlanEntry[] = [
+        {
+          content: 'Updated task',
+          priority: 'high',
+          status: 'in_progress',
+        },
+      ];
+
+      handlerWithNotifications.updatePlan('session1', entries);
+
+      expect(sentNotifications).toHaveLength(0);
+      expect(mockLogger.debug).not.toHaveBeenCalled();
+    });
+
+    it('should send complete plan update with correct structure', () => {
+      // Enable sendPlan for this test
+      (handlerWithNotifications as any).processingConfig.sendPlan = true;
+
+      const entries: PlanEntry[] = [
+        {
+          content: 'Task 1',
+          priority: 'high',
+          status: 'completed',
+        },
+        {
+          content: 'Task 2',
+          priority: 'medium',
+          status: 'in_progress',
+        },
+        {
+          content: 'Task 3',
+          priority: 'low',
+          status: 'pending',
+        },
+      ];
+
+      handlerWithNotifications.updatePlan('session1', entries);
+
+      expect(sentNotifications).toHaveLength(1);
+      expect(sentNotifications[0]!).toMatchObject({
+        jsonrpc: '2.0',
+        method: 'session/update',
+        params: {
+          sessionId: 'session1',
+          update: {
+            sessionUpdate: 'plan',
+            entries: [
+              {
+                content: 'Task 1',
+                priority: 'high',
+                status: 'completed',
+              },
+              {
+                content: 'Task 2',
+                priority: 'medium',
+                status: 'in_progress',
+              },
+              {
+                content: 'Task 3',
+                priority: 'low',
+                status: 'pending',
+              },
+            ],
+          },
+        },
+      });
+
+      // Verify SessionNotification type structure
+      const notification = sentNotifications[0]!.params as SessionNotification;
+      expect(notification.sessionId).toBe('session1');
+      expect(notification.update.sessionUpdate).toBe('plan');
+      expect('entries' in notification.update).toBe(true);
+      if ('entries' in notification.update) {
+        expect(notification.update.entries).toHaveLength(3);
+      }
+
+      expect(mockLogger.debug).toHaveBeenCalledWith('Updating plan', {
+        sessionId: 'session1',
+        entryCount: 3,
+      });
+    });
+
+    it('should send complete plan even when updating single entry', () => {
+      // Enable sendPlan for this test
+      (handlerWithNotifications as any).processingConfig.sendPlan = true;
+
+      // Initial plan
+      const initialEntries: PlanEntry[] = [
+        {
+          content: 'Task 1',
+          priority: 'high',
+          status: 'pending',
+        },
+        {
+          content: 'Task 2',
+          priority: 'medium',
+          status: 'pending',
+        },
+      ];
+
+      handlerWithNotifications.sendPlan('session1', initialEntries);
+      sentNotifications = []; // Clear
+
+      // Update: Task 1 is now completed, but must send complete plan
+      const updatedEntries: PlanEntry[] = [
+        {
+          content: 'Task 1',
+          priority: 'high',
+          status: 'completed',
+        },
+        {
+          content: 'Task 2',
+          priority: 'medium',
+          status: 'pending',
+        },
+      ];
+
+      handlerWithNotifications.updatePlan('session1', updatedEntries);
+
+      expect(sentNotifications).toHaveLength(1);
+      const notification = sentNotifications[0]!.params as SessionNotification;
+      if ('entries' in notification.update) {
+        // Must send complete plan, not just the updated entry
+        expect(notification.update.entries).toHaveLength(2);
+        expect(notification.update.entries[0]!.status).toBe('completed');
+        expect(notification.update.entries[1]!.status).toBe('pending');
+      }
+    });
+
+    it('should include _meta field when present in entries', () => {
+      // Enable sendPlan for this test
+      (handlerWithNotifications as any).processingConfig.sendPlan = true;
+
+      const entries: PlanEntry[] = [
+        {
+          content: 'Task with metadata',
+          priority: 'high',
+          status: 'in_progress',
+          _meta: {
+            updatedAt: '2024-01-01T00:00:00Z',
+            source: 'test',
+          },
+        },
+      ];
+
+      handlerWithNotifications.updatePlan('session1', entries);
+
+      expect(sentNotifications).toHaveLength(1);
+      const notification = sentNotifications[0]!.params as SessionNotification;
+      if ('entries' in notification.update) {
+        expect(notification.update.entries[0]!._meta).toEqual({
+          updatedAt: '2024-01-01T00:00:00Z',
+          source: 'test',
+        });
+      }
+    });
+
+    it('should map all required fields correctly', () => {
+      // Enable sendPlan for this test
+      (handlerWithNotifications as any).processingConfig.sendPlan = true;
+
+      const entries: PlanEntry[] = [
+        {
+          content: 'Updated content',
+          priority: 'high',
+          status: 'completed',
+        },
+      ];
+
+      handlerWithNotifications.updatePlan('session1', entries);
+
+      expect(sentNotifications).toHaveLength(1);
+      const notification = sentNotifications[0]!.params as SessionNotification;
+      if ('entries' in notification.update) {
+        const mappedEntries = notification.update.entries;
+        expect(mappedEntries).toHaveLength(1);
+
+        // Verify all required fields are present
+        const entry = mappedEntries[0]!;
+        expect(entry).toHaveProperty('content');
+        expect(entry).toHaveProperty('priority');
+        expect(entry).toHaveProperty('status');
+        expect(entry.content).toBe('Updated content');
+        expect(entry.priority).toBe('high');
+        expect(entry.status).toBe('completed');
+
+        // Verify no invalid fields are present
+        expect(entry).not.toHaveProperty('id');
+        expect(entry).not.toHaveProperty('title');
+        expect(entry).not.toHaveProperty('description');
+      }
+    });
+
+    it('should handle empty entries array', () => {
+      // Enable sendPlan for this test
+      (handlerWithNotifications as any).processingConfig.sendPlan = true;
+
+      handlerWithNotifications.updatePlan('session1', []);
+
+      expect(sentNotifications).toHaveLength(1);
+      const notification = sentNotifications[0]!.params as SessionNotification;
+      if ('entries' in notification.update) {
+        expect(notification.update.entries).toHaveLength(0);
+      }
+
+      expect(mockLogger.debug).toHaveBeenCalledWith('Updating plan', {
+        sessionId: 'session1',
+        entryCount: 0,
+      });
     });
   });
 });

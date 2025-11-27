@@ -11,6 +11,8 @@ import type {
   ContentBlock,
   PromptRequest,
   PromptResponse,
+  PlanEntry,
+  SessionNotification,
 } from '@agentclientprotocol/sdk';
 import type { Error as JsonRpcError } from '@agentclientprotocol/sdk';
 import {
@@ -52,14 +54,6 @@ export interface StreamOptions {
   enabled: boolean;
   chunkSize?: number;
   progressCallback?: (progress: StreamProgress) => void;
-}
-
-// Plan support
-export interface PlanEntry {
-  id: string;
-  title: string;
-  status: 'pending' | 'in_progress' | 'completed' | 'failed';
-  description?: string;
 }
 
 // Prompt processing configuration
@@ -585,70 +579,85 @@ export class PromptHandler {
   }
 
   /**
+   * Internal method to send plan notification to client
+   * Per ACP spec: sessionUpdate must be 'plan' and use 'entries' field.
+   * The agent MUST send a complete list of all plan entries in each update.
+   * The client MUST replace the entire plan with each update.
+   *
+   * @param sessionId - The session ID
+   * @param entries - Complete list of plan entries
+   */
+  private _sendPlanNotification(sessionId: string, entries: PlanEntry[]): void {
+    // Build SDK-compliant SessionNotification
+    // Per ACP spec: sessionUpdate must be 'plan' and use 'entries' field
+    const notification: SessionNotification = {
+      sessionId,
+      update: {
+        sessionUpdate: 'plan',
+        entries: entries.map((entry) => ({
+          content: entry.content,
+          priority: entry.priority,
+          status: entry.status,
+          ...(entry._meta && { _meta: entry._meta }),
+        })),
+      },
+      _meta: {
+        timestamp: new Date().toISOString(),
+        // Optionally add notification sequence if tracking is needed
+      },
+    };
+
+    this.sendNotification({
+      jsonrpc: '2.0',
+      method: 'session/update',
+      params: notification,
+    });
+  }
+
+  /**
    * Send plan to client
    * Per ACP spec: Inform client of multi-step operation plan
-   * Note: Public infrastructure method ready for integration when multi-step planning is implemented
+   * The agent MUST send a complete list of all plan entries in each update.
+   * The client MUST replace the entire plan with each update.
+   *
+   * @param sessionId - The session ID
+   * @param entries - Complete list of plan entries (must include all entries, not just updates)
    */
-  public sendPlan(sessionId: string, plan: PlanEntry[]): void {
-    if (!this.processingConfig.sendPlan || plan.length === 0) {
+  public sendPlan(sessionId: string, entries: PlanEntry[]): void {
+    if (!this.processingConfig.sendPlan || entries.length === 0) {
       return;
     }
 
     this.logger.debug('Sending plan', {
       sessionId,
-      stepCount: plan.length,
+      stepCount: entries.length,
     });
 
-    this.sendNotification({
-      jsonrpc: '2.0',
-      method: 'session/update',
-      params: {
-        sessionId,
-        update: {
-          sessionUpdate: 'plan',
-          plan: plan.map((entry) => ({
-            id: entry.id,
-            title: entry.title,
-            status: entry.status,
-            ...(entry.description && { description: entry.description }),
-          })),
-        },
-      },
-    });
+    this._sendPlanNotification(sessionId, entries);
   }
 
   /**
-   * Update plan entry status
-   * Per ACP spec: Inform client of plan progress
-   * Note: Public infrastructure method ready for integration when multi-step planning is implemented
+   * Update plan to client
+   * Per ACP spec: The agent MUST send a complete list of all plan entries in each update.
+   * The client MUST replace the entire plan with each update.
+   *
+   * This method sends the complete plan state. If you need to update individual entries,
+   * maintain the complete plan state externally and pass the full entries array here.
+   *
+   * @param sessionId - The session ID
+   * @param entries - Complete list of all plan entries with their current status
    */
-  public updatePlanEntry(
-    sessionId: string,
-    entryId: string,
-    status: PlanEntry['status']
-  ): void {
+  public updatePlan(sessionId: string, entries: PlanEntry[]): void {
     if (!this.processingConfig.sendPlan) {
       return;
     }
 
-    this.logger.debug('Updating plan entry', {
+    this.logger.debug('Updating plan', {
       sessionId,
-      entryId,
-      status,
+      entryCount: entries.length,
     });
 
-    this.sendNotification({
-      jsonrpc: '2.0',
-      method: 'session/update',
-      params: {
-        sessionId,
-        update: {
-          sessionUpdate: 'plan_update',
-          planEntryId: entryId,
-          status,
-        },
-      },
-    });
+    this._sendPlanNotification(sessionId, entries);
   }
 
   /**
