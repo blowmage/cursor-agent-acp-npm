@@ -429,14 +429,28 @@ export class ToolRegistry {
 
   /**
    * Validates tool configuration
+   *
+   * Note: Some tools (like filesystem) may not be available immediately during
+   * initialization because they depend on client capabilities. This validation
+   * only checks for critical configuration errors, not runtime availability.
    */
   validateConfiguration(): string[] {
     const errors: string[] = [];
 
     // Check if filesystem tools are configured correctly
+    // Note: Filesystem tools may not be registered yet if client capabilities
+    // haven't been received. They will be registered after initialization.
+    // We only validate that if filesystem is enabled, the provider is registered.
+    // The provider may return 0 tools if capabilities aren't available yet.
     if (this.config.tools.filesystem.enabled) {
-      if (!this.hasTool('read_file') || !this.hasTool('write_file')) {
-        errors.push('Filesystem tools enabled but not properly registered');
+      const hasFilesystemProvider = this.providers.has('filesystem');
+
+      // Only error if provider is not registered at all
+      // The provider may not offer tools yet (waiting for client capabilities)
+      if (!hasFilesystemProvider) {
+        errors.push(
+          'Filesystem tools enabled but filesystem provider not registered'
+        );
       }
     }
 
