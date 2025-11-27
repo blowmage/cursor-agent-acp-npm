@@ -22,7 +22,6 @@ import type {
   SessionModeId,
   ClientCapabilities,
 } from '@agentclientprotocol/sdk';
-import { MockCursorCliBridge } from './mocks/cursor-bridge-mock';
 import { FilesystemToolProvider } from '../../src/tools/filesystem';
 import { AcpFileSystemClient } from '../../src/client/filesystem-client';
 import { promises as fs } from 'fs';
