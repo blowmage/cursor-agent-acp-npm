@@ -3,7 +3,6 @@ const typescriptEslint = require('@typescript-eslint/eslint-plugin');
 const globals = require('globals');
 const js = require('@eslint/js');
 const { FlatCompat } = require('@eslint/eslintrc');
-const prettierConfig = require('eslint-config-prettier');
 
 const compat = new FlatCompat({
   baseDirectory: __dirname,
