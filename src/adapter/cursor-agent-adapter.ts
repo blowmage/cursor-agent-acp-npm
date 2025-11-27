@@ -25,8 +25,6 @@ import {
   type SetSessionModelRequest,
   type SetSessionModelResponse,
   type SessionModeState,
-  type SessionMode,
-  type SessionModeId,
   type SessionModelState,
   type SessionNotification,
   type CancelNotification,
@@ -1495,14 +1493,8 @@ export class CursorAgentAdapter implements ClientConnection {
       return null;
     }
 
-    const availableModes: SessionMode[] = this.sessionManager.getAvailableModes();
-    const currentModeId: SessionModeId = this.sessionManager.getSessionMode(sessionId);
-
-    // Per ACP spec: SessionModeState must include availableModes and currentModeId
-    return {
-      availableModes,
-      currentModeId,
-    };
+    // Per ACP spec: Return SessionModeState with currentModeId and availableModes
+    return this.sessionManager.getSessionModeState(sessionId);
   }
 
   /**

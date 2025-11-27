@@ -20,6 +20,7 @@ import {
 import type {
   SessionMode,
   SessionModeId,
+  SessionModeState,
 } from '@agentclientprotocol/sdk';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -73,7 +74,10 @@ export class SessionManager {
           permissionBehavior: 'strict',
         },
       ],
-      ['architect', { availableTools: ['filesystem'], permissionBehavior: 'strict' }],
+      [
+        'architect',
+        { availableTools: ['filesystem'], permissionBehavior: 'strict' },
+      ],
     ]);
 
   // Available models (can be extended)
@@ -364,6 +368,23 @@ export class SessionManager {
    */
   getAvailableModes(): SessionMode[] {
     return this.availableModes;
+  }
+
+  /**
+   * Gets the complete session mode state
+   * Per ACP spec: Returns SessionModeState with currentModeId and availableModes
+   * @param sessionId - Optional session ID to get current mode for specific session
+   * @returns SessionModeState with current mode and available modes
+   */
+  getSessionModeState(sessionId?: string): SessionModeState {
+    const currentModeId = sessionId
+      ? this.getSessionMode(sessionId)
+      : ('ask' as SessionModeId);
+
+    return {
+      currentModeId,
+      availableModes: this.availableModes,
+    };
   }
 
   /**
