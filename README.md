@@ -4,18 +4,19 @@ A full-featured Agent Client Protocol (ACP) adapter for Cursor CLI, enabling sea
 
 ## Overview
 
-This TypeScript implementation provides a production-ready bridge between the Cursor CLI and editors that support the Agent Client Protocol. It offers feature parity with Zed's built-in Claude and Codex adapters while maintaining high performance and reliability.
+This TypeScript implementation provides a production-ready bridge between the Cursor CLI and editors that support the Agent Client Protocol. Built on the standard **stdio transport** per ACP specification, it offers feature parity with Zed's built-in Claude and Codex adapters while maintaining high performance and reliability.
 
 ## Features
 
 - **ACP Protocol Core** - Initialize, session management, prompt processing
+- **Stdio Transport** - Standard ACP stdio transport per protocol specification
 - **Session Management** - Persistent sessions with metadata and history
 - **Content Processing** - Text, code, and image block handling
 - **Real-time Streaming** - Live response streaming for immediate feedback
 - **Complete Tool System** - Filesystem, terminal, and Cursor-specific tools
 - **Security Framework** - Path validation, command filtering, access controls
 - **Error Handling & Recovery** - Robust error handling with comprehensive validation
-- **Type Safety** - Written in TypeScript with strict type checking
+- **Type Safety** - Written in TypeScript with strict type checking using `@agentclientprotocol/sdk`
 - **Test Coverage** - 200+ unit and integration tests with security coverage
 - **Cursor CLI Integration** - Complete integration with cursor-agent CLI features
 - **Advanced Tool Registry** - Dynamic provider management and validation
@@ -54,12 +55,14 @@ npm install @blowmage/cursor-agent-acp
 ### Basic Usage
 
 ```bash
-# Start the ACP adapter
+# Start the ACP adapter with stdio transport
 cursor-agent-acp
 
 # Or run directly with npx
 npx cursor-agent-acp
 ```
+
+The adapter uses **stdio transport** by default, which is the standard transport for the Agent Client Protocol. The adapter reads JSON-RPC messages from stdin and writes responses to stdout, with messages delimited by newlines as specified in the [ACP Transport Specification](https://agentclientprotocol.com/protocol/transports).
 
 ### Zed Editor Integration
 
@@ -93,7 +96,32 @@ If installed locally:
 
 ### Using with Other Editors
 
-The adapter works with any ACP-compliant editor. Configure your editor to launch `cursor-agent-acp` as an agent server using stdio transport.
+The adapter works with any ACP-compliant editor using the standard stdio transport. Configure your editor to launch `cursor-agent-acp` as an agent server process.
+
+## Transport Layer
+
+This adapter implements the **stdio transport** as specified in the [ACP Transport Specification](https://agentclientprotocol.com/protocol/transports).
+
+### Stdio Transport (Default)
+
+The stdio transport is the recommended transport for ACP:
+
+- **Standard Communication**: JSON-RPC messages over stdin/stdout
+- **Message Format**: Newline-delimited JSON (`\n` delimiter)
+- **Logging**: Uses stderr for diagnostic output
+- **No Embedded Newlines**: Messages must not contain `\n` or `\r`
+- **SDK Compliant**: Uses `@agentclientprotocol/sdk` for all protocol handling
+
+### Why Stdio?
+
+Stdio is the default and recommended transport for ACP because:
+
+1. **Universal Support**: Works with any process-based editor integration
+2. **Simple & Reliable**: Well-understood subprocess communication
+3. **Specification Compliant**: Follows ACP transport specification exactly
+4. **SDK Integration**: Full support via `@agentclientprotocol/sdk`
+
+For more details, see [`docs/TRANSPORTS.md`](docs/TRANSPORTS.md).
 
 ## Configuration
 
