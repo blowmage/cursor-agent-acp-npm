@@ -34,7 +34,6 @@ import {
   type ReadTextFileResponse,
   type WriteTextFileRequest,
   type WriteTextFileResponse,
-  type ExtMethodResponse,
 } from '@agentclientprotocol/sdk';
 import type { Error as JsonRpcError } from '@agentclientprotocol/sdk';
 import { CursorAgentImplementation } from './agent-implementation';
@@ -1987,7 +1986,7 @@ export class CursorAgentAdapter implements ClientConnection {
   private async handleExtensionMethod(request: Request | Request1): Promise<{
     jsonrpc: '2.0';
     id: string | number | null;
-    result?: ExtMethodResponse | null;
+    result?: Record<string, unknown> | null;
     error?: JsonRpcError;
   }> {
     if (!this.extensionRegistry) {
@@ -2019,7 +2018,7 @@ export class CursorAgentAdapter implements ClientConnection {
     }
 
     try {
-      // Call the extension method
+      // Call the extension method - returns ExtMethodResponse (Record<string, unknown>)
       const result = await this.extensionRegistry.callMethod(
         methodName,
         params
@@ -2028,7 +2027,7 @@ export class CursorAgentAdapter implements ClientConnection {
       return {
         jsonrpc: '2.0',
         id: request.id,
-        result: result as ExtMethodResponse,
+        result,
       };
     } catch (error) {
       this.logger.error('Extension method execution failed', {

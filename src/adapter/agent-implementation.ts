@@ -29,11 +29,6 @@ import type {
 } from '@agentclientprotocol/sdk';
 import type { CursorAgentAdapter } from './cursor-agent-adapter';
 import type { Logger } from '../types';
-import type {
-  ExtMethodRequest,
-  ExtMethodResponse,
-  ExtNotification,
-} from '@agentclientprotocol/sdk';
 
 /**
  * Agent implementation that delegates to CursorAgentAdapter
@@ -207,8 +202,8 @@ export class CursorAgentImplementation implements Agent {
    */
   async extMethod(
     method: string,
-    params: ExtMethodRequest
-  ): Promise<ExtMethodResponse> {
+    params: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
     this.logger.debug('Agent.extMethod called', { method, params });
 
     if (!this.adapter) {
@@ -217,11 +212,8 @@ export class CursorAgentImplementation implements Agent {
 
     try {
       const registry = this.adapter.getExtensionRegistry();
-      const result = await registry.callMethod(
-        method,
-        params as Record<string, unknown>
-      );
-      return result as ExtMethodResponse;
+      const result = await registry.callMethod(method, params);
+      return result;
     } catch (error) {
       // If method not found, throw proper JSON-RPC error
       if (error instanceof Error && error.message.includes('not found')) {
@@ -240,7 +232,7 @@ export class CursorAgentImplementation implements Agent {
    */
   async extNotification(
     method: string,
-    params: ExtNotification
+    params: Record<string, unknown>
   ): Promise<void> {
     this.logger.debug('Agent.extNotification called', { method, params });
 
@@ -257,10 +249,7 @@ export class CursorAgentImplementation implements Agent {
 
     try {
       const registry = this.adapter.getExtensionRegistry();
-      await registry.sendNotification(
-        method,
-        params as Record<string, unknown>
-      );
+      await registry.sendNotification(method, params);
     } catch (error) {
       // Per ACP spec: SHOULD ignore unrecognized notifications
       // Log but don't throw

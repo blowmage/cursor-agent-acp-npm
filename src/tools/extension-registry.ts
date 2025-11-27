@@ -7,24 +7,93 @@
  * Extension methods and notifications MUST start with an underscore (_) to avoid
  * conflicts with future protocol versions.
  * All types use @agentclientprotocol/sdk for strict compliance.
+ *
+ * ## Usage Example
+ *
+ * ```typescript
+ * import { ExtensionRegistry } from '@blowmage/cursor-agent-acp';
+ *
+ * const registry = new ExtensionRegistry(logger);
+ *
+ * // Register an extension method
+ * // Method names MUST start with underscore and SHOULD use namespaces
+ * registry.registerMethod('_myapp/custom_action', async (params) => {
+ *   // Handle the method
+ *   return { success: true, result: params.input };
+ * });
+ *
+ * // Register an extension notification
+ * registry.registerNotification('_myapp/status_update', async (params) => {
+ *   // Handle notification (one-way, no response)
+ *   console.log('Status:', params.status);
+ * });
+ * ```
+ *
+ * ## Naming Conventions
+ *
+ * Per ACP spec, extension names MUST:
+ * - Start with underscore (_)
+ * - Use namespaces to avoid conflicts (e.g., `_myapp/method`)
+ * - Follow format: `_namespace/name`
+ *
+ * ## Invocation from Clients
+ *
+ * Clients invoke extension methods via JSON-RPC:
+ * ```json
+ * {
+ *   "jsonrpc": "2.0",
+ *   "id": 1,
+ *   "method": "_myapp/custom_action",
+ *   "params": { "input": "value" }
+ * }
+ * ```
+ *
+ * Clients send extension notifications via JSON-RPC (no response expected):
+ * ```json
+ * {
+ *   "jsonrpc": "2.0",
+ *   "method": "_myapp/status_update",
+ *   "params": { "status": "running" }
+ * }
+ * ```
  */
 
 import type { Logger } from '../types';
 
 /**
+ * Extension method request parameters
+ * Per ACP spec: Arbitrary JSON-RPC params object
+ */
+export type ExtMethodRequest = Record<string, unknown>;
+
+/**
+ * Extension method response
+ * Per ACP spec: Arbitrary JSON-RPC result object
+ */
+export type ExtMethodResponse = Record<string, unknown>;
+
+/**
+ * Extension notification parameters
+ * Per ACP spec: Arbitrary JSON-RPC params object
+ */
+export type ExtNotificationParams = Record<string, unknown>;
+
+/**
  * Handler function for extension methods
  * Receives params and returns result
+ * Per ACP SDK Agent interface signature
  */
 export type ExtensionMethodHandler = (
-  params: Record<string, unknown>
-) => Promise<Record<string, unknown>>;
+  params: ExtMethodRequest
+) => Promise<ExtMethodResponse>;
 
 /**
  * Handler function for extension notifications
  * Receives params and returns void (notifications are one-way)
+ * Per ACP SDK Agent interface signature
  */
 export type ExtensionNotificationHandler = (
-  params: Record<string, unknown>
+  params: ExtNotificationParams
 ) => Promise<void>;
 
 /**
@@ -130,8 +199,8 @@ export class ExtensionRegistry {
    */
   async callMethod(
     name: string,
-    params: Record<string, unknown>
-  ): Promise<Record<string, unknown>> {
+    params: ExtMethodRequest
+  ): Promise<ExtMethodResponse> {
     const handler = this.methods.get(name);
 
     if (!handler) {
@@ -163,7 +232,7 @@ export class ExtensionRegistry {
    */
   async sendNotification(
     name: string,
-    params: Record<string, unknown>
+    params: ExtNotificationParams
   ): Promise<void> {
     const handler = this.notifications.get(name);
 

@@ -10,6 +10,7 @@ export { SessionManager } from './session/manager';
 export { CursorCliBridge } from './cursor/cli-bridge';
 export { ToolRegistry } from './tools/registry';
 export { SlashCommandsRegistry } from './tools/slash-commands';
+export { ExtensionRegistry } from './tools/extension-registry';
 
 // Type exports
 export type {
@@ -41,6 +42,15 @@ export type {
 
 // Protocol types
 export type { InitializationConfig } from './protocol/initialization';
+
+// Extension types
+export type {
+  ExtensionMethodHandler,
+  ExtensionNotificationHandler,
+  ExtMethodRequest,
+  ExtMethodResponse,
+  ExtNotificationParams,
+} from './tools/extension-registry';
 
 // Import the type for the default config
 import type { AdapterConfig } from './types';
