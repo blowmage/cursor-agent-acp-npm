@@ -39,13 +39,13 @@ interface CliOptions {
 // Read version from package.json
 const packagePath = join(__dirname, '../../package.json');
 const packageInfo = JSON.parse(readFileSync(packagePath, 'utf8'));
-const VERSION = packageInfo.version;
+const packageVersion = packageInfo.version;
 
 // Setup command line interface
 program
   .name('cursor-agent-acp')
   .description('Agent Client Protocol adapter for Cursor CLI')
-  .version(VERSION);
+  .version(packageVersion, '-v, --version', 'output the version number');
 
 // Auth command group
 const authCommand = program
@@ -97,7 +97,7 @@ program
     'maximum number of terminal processes',
     '5'
   )
-  .option('-v, --verbose', 'enable verbose logging')
+  .option('--verbose', 'enable verbose logging')
   .option('-q, --quiet', 'suppress all output except errors')
   .option('--validate', 'validate configuration and exit')
   .option('--test-cursor', 'test cursor-agent connectivity and exit')
@@ -196,7 +196,7 @@ async function main(): Promise<void> {
       ...(options.logFile !== undefined && { filename: options.logFile }),
     });
 
-    logger.info(`Starting Cursor Agent ACP Adapter v${VERSION}`);
+    logger.info(`Starting Cursor Agent ACP Adapter v${packageVersion}`);
 
     // Load and merge configuration
     let config: AdapterConfig = { ...DEFAULT_CONFIG };
