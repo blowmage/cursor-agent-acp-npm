@@ -429,18 +429,18 @@ describe('SessionManager - Session Modes', () => {
         if (askConfig) {
           // All fields are optional per InternalSessionModeConfig
           expect(typeof askConfig).toBe('object');
-          
+
           if (askConfig.systemPrompt !== undefined) {
             expect(typeof askConfig.systemPrompt).toBe('string');
           }
-          
+
           if (askConfig.availableTools !== undefined) {
             expect(Array.isArray(askConfig.availableTools)).toBe(true);
-            askConfig.availableTools.forEach(tool => {
+            askConfig.availableTools.forEach((tool) => {
               expect(typeof tool).toBe('string');
             });
           }
-          
+
           if (askConfig.permissionBehavior !== undefined) {
             expect(['strict', 'permissive', 'auto']).toContain(
               askConfig.permissionBehavior
@@ -474,7 +474,7 @@ describe('SessionManager - Session Modes', () => {
         const availableModes = manager.getAvailableModes();
 
         // Act & Assert
-        availableModes.forEach(mode => {
+        availableModes.forEach((mode) => {
           const config = manager.getModeConfig(mode.id);
           expect(config).toBeDefined();
           expect(config).toHaveProperty('permissionBehavior');
@@ -484,11 +484,11 @@ describe('SessionManager - Session Modes', () => {
       it('should have exactly 3 mode configs', () => {
         // Arrange
         const availableModes = manager.getAvailableModes();
-        const modeIds = availableModes.map(m => m.id);
+        const modeIds = availableModes.map((m) => m.id);
 
         // Act - Count configs that exist
-        const configCount = modeIds.filter(id => 
-          manager.getModeConfig(id) !== undefined
+        const configCount = modeIds.filter(
+          (id) => manager.getModeConfig(id) !== undefined
         ).length;
 
         // Assert
@@ -503,7 +503,7 @@ describe('SessionManager - Session Modes', () => {
         const availableModes = manager.getAvailableModes();
 
         // Act & Assert - All current modes should be strict
-        availableModes.forEach(mode => {
+        availableModes.forEach((mode) => {
           const config = manager.getModeConfig(mode.id);
           expect(config?.permissionBehavior).toBe('strict');
         });
@@ -535,7 +535,7 @@ describe('SessionManager - Session Modes', () => {
         const architectTools = architectConfig?.availableTools ?? [];
         const codeTools = codeConfig?.availableTools ?? [];
 
-        architectTools.forEach(tool => {
+        architectTools.forEach((tool) => {
           expect(codeTools).toContain(tool);
         });
       });
