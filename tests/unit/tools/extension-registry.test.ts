@@ -42,7 +42,9 @@ describe('ExtensionRegistry', () => {
 
       expect(() => {
         registry.registerMethod('test/method', handler);
-      }).toThrow('Extension method name must start with underscore');
+      }).toThrow(
+        'Extension method name must start with underscore: test/method'
+      );
 
       expect(registry.hasMethod('test/method')).toBe(false);
     });
@@ -52,7 +54,7 @@ describe('ExtensionRegistry', () => {
 
       expect(() => {
         registry.registerMethod('', handler);
-      }).toThrow('Extension method name must start with underscore');
+      }).toThrow('Extension method name must start with underscore: ');
     });
 
     it('should reject non-function handlers', () => {
@@ -69,6 +71,20 @@ describe('ExtensionRegistry', () => {
       registry.registerMethod('_test/method', handler2);
 
       expect(registry.hasMethod('_test/method')).toBe(true);
+    });
+
+    it('should accept method names without namespace separator', () => {
+      const handler = jest.fn().mockResolvedValue({ result: 'success' });
+
+      registry.registerMethod('_simplemethod', handler);
+
+      expect(registry.hasMethod('_simplemethod')).toBe(true);
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        'Registered extension method',
+        {
+          name: '_simplemethod',
+        }
+      );
     });
   });
 
@@ -92,7 +108,9 @@ describe('ExtensionRegistry', () => {
 
       expect(() => {
         registry.registerNotification('test/notification', handler);
-      }).toThrow('Extension notification name must start with underscore');
+      }).toThrow(
+        'Extension notification name must start with underscore: test/notification'
+      );
     });
 
     it('should reject non-function handlers', () => {
@@ -102,6 +120,20 @@ describe('ExtensionRegistry', () => {
           'not a function' as any
         );
       }).toThrow('Extension notification handler must be a function');
+    });
+
+    it('should accept notification names without namespace separator', () => {
+      const handler = jest.fn().mockResolvedValue(undefined);
+
+      registry.registerNotification('_simpleevent', handler);
+
+      expect(registry.hasNotification('_simpleevent')).toBe(true);
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        'Registered extension notification',
+        {
+          name: '_simpleevent',
+        }
+      );
     });
   });
 
