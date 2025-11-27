@@ -313,13 +313,232 @@ describe('SessionManager - Session Modes', () => {
       expect(config).toBeUndefined();
     });
 
-    it('should include permission behavior in config', () => {
+    it('should return undefined for empty string mode', () => {
       // Act
-      const askConfig = manager.getModeConfig('ask');
+      const config = manager.getModeConfig('' as SessionModeId);
 
       // Assert
-      expect(askConfig).toHaveProperty('permissionBehavior');
-      expect(askConfig?.permissionBehavior).toBe('strict');
+      expect(config).toBeUndefined();
+    });
+
+    it('should return undefined for null-like mode IDs', () => {
+      // Act
+      const config1 = manager.getModeConfig(null as any);
+      const config2 = manager.getModeConfig(undefined as any);
+
+      // Assert
+      expect(config1).toBeUndefined();
+      expect(config2).toBeUndefined();
+    });
+
+    describe('ask mode configuration', () => {
+      it('should have strict permission behavior', () => {
+        // Act
+        const askConfig = manager.getModeConfig('ask');
+
+        // Assert
+        expect(askConfig).toBeDefined();
+        expect(askConfig?.permissionBehavior).toBe('strict');
+      });
+
+      it('should not define available tools', () => {
+        // Act
+        const askConfig = manager.getModeConfig('ask');
+
+        // Assert - Ask mode doesn't specify tools, relies on default behavior
+        expect(askConfig?.availableTools).toBeUndefined();
+      });
+
+      it('should not define system prompt', () => {
+        // Act
+        const askConfig = manager.getModeConfig('ask');
+
+        // Assert
+        expect(askConfig?.systemPrompt).toBeUndefined();
+      });
+    });
+
+    describe('code mode configuration', () => {
+      it('should have strict permission behavior', () => {
+        // Act
+        const codeConfig = manager.getModeConfig('code');
+
+        // Assert
+        expect(codeConfig).toBeDefined();
+        expect(codeConfig?.permissionBehavior).toBe('strict');
+      });
+
+      it('should include filesystem and terminal tools', () => {
+        // Act
+        const codeConfig = manager.getModeConfig('code');
+
+        // Assert
+        expect(codeConfig?.availableTools).toBeDefined();
+        expect(Array.isArray(codeConfig?.availableTools)).toBe(true);
+        expect(codeConfig?.availableTools).toContain('filesystem');
+        expect(codeConfig?.availableTools).toContain('terminal');
+        expect(codeConfig?.availableTools?.length).toBe(2);
+      });
+
+      it('should have both filesystem and terminal in correct order', () => {
+        // Act
+        const codeConfig = manager.getModeConfig('code');
+
+        // Assert
+        expect(codeConfig?.availableTools).toEqual(['filesystem', 'terminal']);
+      });
+    });
+
+    describe('architect mode configuration', () => {
+      it('should have strict permission behavior', () => {
+        // Act
+        const architectConfig = manager.getModeConfig('architect');
+
+        // Assert
+        expect(architectConfig).toBeDefined();
+        expect(architectConfig?.permissionBehavior).toBe('strict');
+      });
+
+      it('should include only filesystem tool', () => {
+        // Act
+        const architectConfig = manager.getModeConfig('architect');
+
+        // Assert
+        expect(architectConfig?.availableTools).toBeDefined();
+        expect(Array.isArray(architectConfig?.availableTools)).toBe(true);
+        expect(architectConfig?.availableTools).toContain('filesystem');
+        expect(architectConfig?.availableTools).not.toContain('terminal');
+        expect(architectConfig?.availableTools?.length).toBe(1);
+      });
+
+      it('should not include terminal tool', () => {
+        // Act
+        const architectConfig = manager.getModeConfig('architect');
+
+        // Assert - Architect mode is for planning, not executing
+        expect(architectConfig?.availableTools).toEqual(['filesystem']);
+      });
+    });
+
+    describe('configuration structure', () => {
+      it('should return InternalSessionModeConfig type', () => {
+        // Act
+        const askConfig = manager.getModeConfig('ask');
+
+        // Assert - Check structure matches InternalSessionModeConfig
+        if (askConfig) {
+          // All fields are optional per InternalSessionModeConfig
+          expect(typeof askConfig).toBe('object');
+          
+          if (askConfig.systemPrompt !== undefined) {
+            expect(typeof askConfig.systemPrompt).toBe('string');
+          }
+          
+          if (askConfig.availableTools !== undefined) {
+            expect(Array.isArray(askConfig.availableTools)).toBe(true);
+            askConfig.availableTools.forEach(tool => {
+              expect(typeof tool).toBe('string');
+            });
+          }
+          
+          if (askConfig.permissionBehavior !== undefined) {
+            expect(['strict', 'permissive', 'auto']).toContain(
+              askConfig.permissionBehavior
+            );
+          }
+        }
+      });
+
+      it('should return consistent config for same mode', () => {
+        // Act
+        const config1 = manager.getModeConfig('code');
+        const config2 = manager.getModeConfig('code');
+
+        // Assert - Should return same reference/equivalent config
+        expect(config1).toEqual(config2);
+      });
+
+      it('should return different configs for different modes', () => {
+        // Act
+        const askConfig = manager.getModeConfig('ask');
+        const codeConfig = manager.getModeConfig('code');
+
+        // Assert - Configs should be different
+        expect(askConfig).not.toEqual(codeConfig);
+      });
+    });
+
+    describe('all available modes have configs', () => {
+      it('should have config for every available mode', () => {
+        // Arrange
+        const availableModes = manager.getAvailableModes();
+
+        // Act & Assert
+        availableModes.forEach(mode => {
+          const config = manager.getModeConfig(mode.id);
+          expect(config).toBeDefined();
+          expect(config).toHaveProperty('permissionBehavior');
+        });
+      });
+
+      it('should have exactly 3 mode configs', () => {
+        // Arrange
+        const availableModes = manager.getAvailableModes();
+        const modeIds = availableModes.map(m => m.id);
+
+        // Act - Count configs that exist
+        const configCount = modeIds.filter(id => 
+          manager.getModeConfig(id) !== undefined
+        ).length;
+
+        // Assert
+        expect(configCount).toBe(3);
+        expect(modeIds).toEqual(['ask', 'architect', 'code']);
+      });
+    });
+
+    describe('permission behavior consistency', () => {
+      it('should all modes use strict permission behavior', () => {
+        // Arrange
+        const availableModes = manager.getAvailableModes();
+
+        // Act & Assert - All current modes should be strict
+        availableModes.forEach(mode => {
+          const config = manager.getModeConfig(mode.id);
+          expect(config?.permissionBehavior).toBe('strict');
+        });
+      });
+    });
+
+    describe('tool availability patterns', () => {
+      it('should have increasing tool availability: ask < architect < code', () => {
+        // Act
+        const askConfig = manager.getModeConfig('ask');
+        const architectConfig = manager.getModeConfig('architect');
+        const codeConfig = manager.getModeConfig('code');
+
+        // Assert - Tool availability increases
+        const askTools = askConfig?.availableTools?.length ?? 0;
+        const architectTools = architectConfig?.availableTools?.length ?? 0;
+        const codeTools = codeConfig?.availableTools?.length ?? 0;
+
+        expect(askTools).toBeLessThanOrEqual(architectTools);
+        expect(architectTools).toBeLessThan(codeTools);
+      });
+
+      it('should code mode have superset of architect tools', () => {
+        // Act
+        const architectConfig = manager.getModeConfig('architect');
+        const codeConfig = manager.getModeConfig('code');
+
+        // Assert - Code should include all architect tools
+        const architectTools = architectConfig?.availableTools ?? [];
+        const codeTools = codeConfig?.availableTools ?? [];
+
+        architectTools.forEach(tool => {
+          expect(codeTools).toContain(tool);
+        });
+      });
     });
   });
 
