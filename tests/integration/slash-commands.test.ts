@@ -135,7 +135,7 @@ describe('Slash Commands Integration', () => {
         },
       };
 
-      const response = await adapter.processRequest(request);
+      await adapter.processRequest(request);
 
       const commandsNotification = capturedNotifications.find(
         (n) =>
