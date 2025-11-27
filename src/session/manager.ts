@@ -171,6 +171,14 @@ export class SessionManager {
   }
 
   /**
+   * Check if a session exists in memory
+   * Does not load from disk - only checks in-memory sessions
+   */
+  hasSession(sessionId: string): boolean {
+    return this.sessions.has(sessionId);
+  }
+
+  /**
    * Loads an existing session
    */
   async loadSession(sessionId: string): Promise<SessionData> {

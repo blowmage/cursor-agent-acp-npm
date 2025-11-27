@@ -355,9 +355,8 @@ export class CursorAgentAdapter implements ClientConnection {
       );
     }
 
-    // Verify session exists
-    const session = this.sessionManager['sessions'].get(sessionId);
-    if (!session) {
+    // Verify session exists using public API
+    if (!this.sessionManager.hasSession(sessionId)) {
       this.logger.warn('Cannot update commands for non-existent session', {
         sessionId,
       });
@@ -510,11 +509,25 @@ export class CursorAgentAdapter implements ClientConnection {
     // Note: We'll only send notifications for active sessions
     this.slashCommandsRegistry.onChange(() => {
       // When commands change, send updates to all active sessions
-      this.sessionManager.listSessions().then(result => {
-        result.items.forEach(session => {
-          this.sendAvailableCommandsUpdate(session.id);
+      if (!this.sessionManager) {
+        this.logger.debug(
+          'Session manager not available, skipping command update notifications'
+        );
+        return;
+      }
+
+      this.sessionManager
+        .listSessions()
+        .then((result) => {
+          result.items.forEach((session) => {
+            this.sendAvailableCommandsUpdate(session.id);
+          });
+        })
+        .catch((error) => {
+          this.logger.warn('Failed to send command updates to sessions', {
+            error,
+          });
         });
-      });
       this.logger.debug('Slash commands updated, notified all active sessions');
     });
 

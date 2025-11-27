@@ -57,7 +57,6 @@ describe('CursorAgentAdapter - session/load', () => {
     sentNotifications = [];
 
     // Spy on process.stdout.write to capture notifications
-    const originalWrite = process.stdout.write;
     jest.spyOn(process.stdout, 'write').mockImplementation((chunk: any) => {
       const str = typeof chunk === 'string' ? chunk : chunk.toString();
       try {
