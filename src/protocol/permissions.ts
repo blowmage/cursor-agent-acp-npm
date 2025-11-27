@@ -103,24 +103,24 @@ export class PermissionsHandler {
       return createErrorResponse(request.id, validation.error);
     }
 
-    const params = validation.params as RequestPermissionRequest;
+    const params = validation.params;
 
-    if (!params.sessionId || typeof params.sessionId !== 'string') {
+    if (!params['sessionId'] || typeof params['sessionId'] !== 'string') {
       throw new ProtocolError('sessionId is required and must be a string');
     }
 
-    if (!params.toolCall || typeof params.toolCall !== 'object') {
+    if (!params['toolCall'] || typeof params['toolCall'] !== 'object') {
       throw new ProtocolError('toolCall is required and must be an object');
     }
 
-    if (!Array.isArray(params.options) || params.options.length === 0) {
+    if (!Array.isArray(params['options']) || params['options'].length === 0) {
       throw new ProtocolError(
         'options is required and must be a non-empty array'
       );
     }
 
     // Validate options
-    for (const option of params.options) {
+    for (const option of params['options'] as any[]) {
       if (!this.isValidPermissionOption(option)) {
         throw new ProtocolError(
           `Invalid permission option: ${JSON.stringify(option)}`
@@ -130,9 +130,9 @@ export class PermissionsHandler {
 
     this.logger.debug('Processing permission request', {
       requestId: request.id,
-      sessionId: params.sessionId,
-      toolCallId: params.toolCall.toolCallId,
-      optionCount: params.options.length,
+      sessionId: params['sessionId'],
+      toolCallId: (params['toolCall'] as any).toolCallId,
+      optionCount: (params['options'] as any[]).length,
     });
 
     // In a real implementation, this would:
@@ -145,13 +145,13 @@ export class PermissionsHandler {
     // - Require explicit permission for edits/deletes/executes
 
     const outcome = this.getDefaultPermissionOutcome(
-      params.toolCall.kind || 'other',
-      params.options
+      (params['toolCall'] as any).kind || 'other',
+      params['options'] as any[]
     );
 
     this.logger.debug('Permission request outcome', {
       requestId: request.id,
-      sessionId: params.sessionId,
+      sessionId: params['sessionId'],
       outcome,
     });
 
