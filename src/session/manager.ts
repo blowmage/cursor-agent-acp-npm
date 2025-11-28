@@ -82,7 +82,8 @@ export class SessionManager {
     ]);
 
   // Available models (synced with cursor-agent CLI)
-  // Models discovered from: cursor-agent --model unknown
+  // Models discovered from `cursor-agent --model unknown` error response.
+  // (There is not yet an official way to obtain the list of available models.)
   private readonly availableModels: SessionModel[] = [
     {
       id: 'composer-1',
