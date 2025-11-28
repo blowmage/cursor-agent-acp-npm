@@ -616,6 +616,16 @@ export class CursorAgentAdapter implements ClientConnection {
       'description of what to plan'
     );
 
+    // Register model switching command
+    // Allows users to change the session model during conversation
+    const availableModels = this.sessionManager?.getAvailableModels() || [];
+    const modelNames = availableModels.map((m) => m.id).join(', ');
+    this.slashCommandsRegistry.registerCommand(
+      'model',
+      `Switch to a different model. Available: ${modelNames}`,
+      'model-id'
+    );
+
     // Note: Additional commands can be registered here or dynamically during runtime
     this.logger.debug('Default slash commands registered', {
       count: this.slashCommandsRegistry.getCommandCount(),
@@ -1822,18 +1832,56 @@ export class CursorAgentAdapter implements ClientConnection {
 
   /**
    * Handle setSessionModel from Agent implementation
+   * Per ACP spec (UNSTABLE): Model state is sent in session responses but notifications not yet supported
    */
   async handleSetSessionModelFromAgent(
     params: SetSessionModelRequest
   ): Promise<SetSessionModelResponse | void> {
-    const response = await this.handleSetSessionModel({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'session/set_model',
-      params,
-    } as unknown as Request);
+    if (!this.sessionManager) {
+      throw new ProtocolError('Session manager not available');
+    }
 
-    return response.result as SetSessionModelResponse;
+    // Get previous model for tracking
+    const previousModelId = this.sessionManager.getSessionModel(
+      params.sessionId
+    );
+
+    // Set the model (this validates and updates the session)
+    await this.sessionManager.setSessionModel(params.sessionId, params.modelId);
+
+    // NOTE: Per ACP spec, current_model_update is not yet in the SDK's SessionUpdate union
+    // Model state is communicated via session/new and session/load responses, but dynamic
+    // updates during a session are not yet officially supported. Clients will need to
+    // track model changes via set_model responses or re-query session state.
+    //
+    // Once the SDK adds support for current_model_update notification, uncomment:
+    // if (this.agentConnection) {
+    //   const notification: SessionNotification = {
+    //     sessionId: params.sessionId,
+    //     update: {
+    //       sessionUpdate: 'current_model_update',
+    //       currentModelId: params.modelId,
+    //     },
+    //   };
+    //   await this.agentConnection.sessionUpdate(notification);
+    // }
+
+    this.logger.info('Session model changed', {
+      sessionId: params.sessionId,
+      previousModel: previousModelId,
+      newModel: params.modelId,
+    });
+
+    // Return response per ACP spec
+    const response: SetSessionModelResponse = {
+      _meta: {
+        previousModel: previousModelId,
+        newModel: params.modelId,
+        changedAt: new Date().toISOString(),
+      },
+    };
+
+    return response;
   }
 
   /**

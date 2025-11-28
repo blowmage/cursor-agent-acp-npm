@@ -692,4 +692,137 @@ describe('SessionManager', () => {
       await expect(manager.loadSession(undefined as any)).rejects.toThrow();
     });
   });
+
+  describe('getAvailableModels', () => {
+    it('should return list of available models', () => {
+      // Act
+      const models = manager.getAvailableModels();
+
+      // Assert
+      expect(models).toBeInstanceOf(Array);
+      expect(models.length).toBeGreaterThan(0);
+      expect(models[0]).toHaveProperty('id');
+      expect(models[0]).toHaveProperty('name');
+      expect(models[0]).toHaveProperty('provider');
+    });
+
+    it('should include all expected models', () => {
+      // Act
+      const models = manager.getAvailableModels();
+      const modelIds = models.map((m) => m.id);
+
+      // Assert - Check for some key models
+      expect(modelIds).toContain('auto');
+      expect(modelIds).toContain('composer-1');
+      expect(modelIds).toContain('sonnet-4.5');
+      expect(modelIds).toContain('gpt-5');
+      expect(modelIds).toContain('grok');
+    });
+  });
+
+  describe('getSessionModel', () => {
+    it('should return default model for new session', async () => {
+      // Arrange
+      const session = await manager.createSession();
+
+      // Act
+      const model = manager.getSessionModel(session.id);
+
+      // Assert
+      expect(model).toBe('auto'); // Default model
+    });
+
+    it('should return custom model when specified', async () => {
+      // Arrange
+      const session = await manager.createSession({ model: 'sonnet-4.5' });
+
+      // Act
+      const model = manager.getSessionModel(session.id);
+
+      // Assert
+      expect(model).toBe('sonnet-4.5');
+    });
+
+    it('should return default for non-existent session', () => {
+      // Act
+      const model = manager.getSessionModel('non-existent');
+
+      // Assert
+      expect(model).toBe('auto');
+    });
+  });
+
+  describe('setSessionModel', () => {
+    let testSession: SessionData;
+
+    beforeEach(async () => {
+      testSession = await manager.createSession({ name: 'Model Test' });
+    });
+
+    it('should change session model', async () => {
+      // Act
+      await manager.setSessionModel(testSession.id, 'gpt-5');
+
+      // Assert
+      const model = manager.getSessionModel(testSession.id);
+      expect(model).toBe('gpt-5');
+    });
+
+    it('should throw error for invalid model', async () => {
+      // Act & Assert
+      await expect(
+        manager.setSessionModel(testSession.id, 'invalid-model')
+      ).rejects.toThrow(SessionError);
+      await expect(
+        manager.setSessionModel(testSession.id, 'invalid-model')
+      ).rejects.toThrow(/Invalid model/);
+    });
+
+    it('should throw error for non-existent session', async () => {
+      // Act & Assert
+      await expect(
+        manager.setSessionModel('non-existent', 'gpt-5')
+      ).rejects.toThrow(SessionError);
+    });
+
+    it('should update session metadata', async () => {
+      // Act
+      await manager.setSessionModel(testSession.id, 'sonnet-4.5');
+
+      // Assert
+      const session = await manager.loadSession(testSession.id);
+      expect(session.metadata.model).toBe('sonnet-4.5');
+      expect(session.state.currentModel).toBe('sonnet-4.5');
+    });
+
+    it('should update last activity timestamp', async () => {
+      // Arrange
+      const originalActivity = testSession.state.lastActivity;
+      await testHelpers.wait(10);
+
+      // Act
+      await manager.setSessionModel(testSession.id, 'opus-4.5');
+
+      // Assert
+      const session = await manager.loadSession(testSession.id);
+      expect(session.state.lastActivity.getTime()).toBeGreaterThan(
+        originalActivity.getTime()
+      );
+    });
+
+    it('should support all available models', async () => {
+      // Arrange
+      const models = manager.getAvailableModels();
+
+      // Act & Assert - All models should be settable
+      for (const model of models) {
+        await expect(
+          manager.setSessionModel(testSession.id, model.id)
+        ).resolves.not.toThrow();
+
+        const currentModel = manager.getSessionModel(testSession.id);
+        expect(currentModel).toBe(model.id);
+      }
+    });
+  });
 });

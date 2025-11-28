@@ -98,7 +98,7 @@ describe('CursorAgentAdapter - Session Mode Notifications', () => {
       (adapter as any).agentConnection = mockAgentConnection;
       const params: SetSessionModeRequest = {
         sessionId,
-        modeId: 'code',
+        modeId: 'agent',
       };
 
       // Act
@@ -110,7 +110,7 @@ describe('CursorAgentAdapter - Session Mode Notifications', () => {
         sessionId,
         update: {
           sessionUpdate: 'current_mode_update',
-          currentModeId: 'code',
+          currentModeId: 'agent',
         },
       });
     });
@@ -120,7 +120,7 @@ describe('CursorAgentAdapter - Session Mode Notifications', () => {
       (adapter as any).agentConnection = mockAgentConnection;
       const params: SetSessionModeRequest = {
         sessionId,
-        modeId: 'architect',
+        modeId: 'plan',
       };
 
       // Act
@@ -129,7 +129,7 @@ describe('CursorAgentAdapter - Session Mode Notifications', () => {
       // Assert
       const notificationCall =
         mockAgentConnection.sessionUpdate.mock.calls[0][0];
-      expect(notificationCall.update.currentModeId).toBe('architect');
+      expect(notificationCall.update.currentModeId).toBe('plan');
     });
 
     it('should send notification with correct structure per ACP spec', async () => {
@@ -137,7 +137,7 @@ describe('CursorAgentAdapter - Session Mode Notifications', () => {
       (adapter as any).agentConnection = mockAgentConnection;
       const params: SetSessionModeRequest = {
         sessionId,
-        modeId: 'code',
+        modeId: 'agent',
       };
 
       // Act
@@ -160,11 +160,11 @@ describe('CursorAgentAdapter - Session Mode Notifications', () => {
       // Act - Change mode multiple times
       await (adapter as any).handleSetSessionModeFromAgent({
         sessionId,
-        modeId: 'code',
+        modeId: 'agent',
       });
       await (adapter as any).handleSetSessionModeFromAgent({
         sessionId,
-        modeId: 'architect',
+        modeId: 'plan',
       });
       await (adapter as any).handleSetSessionModeFromAgent({
         sessionId,
@@ -199,7 +199,7 @@ describe('CursorAgentAdapter - Session Mode Notifications', () => {
       (adapter as any).agentConnection = mockAgentConnection;
       const params: SetSessionModeRequest = {
         sessionId,
-        modeId: 'code',
+        modeId: 'agent',
       };
 
       // Act
@@ -209,12 +209,12 @@ describe('CursorAgentAdapter - Session Mode Notifications', () => {
 
       // Assert - Mode change should succeed
       expect(result).toBeDefined();
-      expect(result._meta?.newMode).toBe('code');
+      expect(result._meta?.newMode).toBe('agent');
 
       // Verify mode was actually changed
       const sessionManager = (adapter as any).sessionManager;
       const currentMode = sessionManager.getSessionMode(sessionId);
-      expect(currentMode).toBe('code');
+      expect(currentMode).toBe('agent');
     });
 
     it('should log warning when notification fails', async () => {
@@ -226,7 +226,7 @@ describe('CursorAgentAdapter - Session Mode Notifications', () => {
       (adapter as any).agentConnection = mockAgentConnection;
       const params: SetSessionModeRequest = {
         sessionId,
-        modeId: 'architect',
+        modeId: 'plan',
       };
 
       // Act
@@ -240,7 +240,7 @@ describe('CursorAgentAdapter - Session Mode Notifications', () => {
         ),
         expect.objectContaining({
           sessionId,
-          modeId: 'architect',
+          modeId: 'plan',
         })
       );
     });
@@ -253,7 +253,7 @@ describe('CursorAgentAdapter - Session Mode Notifications', () => {
       (adapter as any).agentConnection = mockAgentConnection;
       const params: SetSessionModeRequest = {
         sessionId,
-        modeId: 'code',
+        modeId: 'agent',
       };
 
       // Act & Assert - Should not throw
@@ -270,7 +270,7 @@ describe('CursorAgentAdapter - Session Mode Notifications', () => {
       (adapter as any).agentConnection = mockAgentConnection;
       const params: SetSessionModeRequest = {
         sessionId,
-        modeId: 'code',
+        modeId: 'agent',
       };
 
       // Act
@@ -282,7 +282,7 @@ describe('CursorAgentAdapter - Session Mode Notifications', () => {
       expect(result).toBeDefined();
       expect(result._meta).toBeDefined();
       expect(result._meta?.previousMode).toBe('ask');
-      expect(result._meta?.newMode).toBe('code');
+      expect(result._meta?.newMode).toBe('agent');
       expect(result._meta?.changedAt).toBeDefined();
     });
 
@@ -296,16 +296,16 @@ describe('CursorAgentAdapter - Session Mode Notifications', () => {
       // Act - Try multiple mode changes
       const result1 = await (adapter as any).handleSetSessionModeFromAgent({
         sessionId,
-        modeId: 'code',
+        modeId: 'agent',
       });
       const result2 = await (adapter as any).handleSetSessionModeFromAgent({
         sessionId,
-        modeId: 'architect',
+        modeId: 'plan',
       });
 
       // Assert - Both should succeed
-      expect(result1._meta?.newMode).toBe('code');
-      expect(result2._meta?.newMode).toBe('architect');
+      expect(result1._meta?.newMode).toBe('agent');
+      expect(result2._meta?.newMode).toBe('plan');
     });
 
     it('should include error details in warning log', async () => {
@@ -318,7 +318,7 @@ describe('CursorAgentAdapter - Session Mode Notifications', () => {
       // Act
       await (adapter as any).handleSetSessionModeFromAgent({
         sessionId,
-        modeId: 'code',
+        modeId: 'agent',
       });
 
       // Assert
@@ -337,7 +337,7 @@ describe('CursorAgentAdapter - Session Mode Notifications', () => {
       (adapter as any).agentConnection = null;
       const params: SetSessionModeRequest = {
         sessionId,
-        modeId: 'code',
+        modeId: 'agent',
       };
 
       // Act
@@ -352,7 +352,7 @@ describe('CursorAgentAdapter - Session Mode Notifications', () => {
       (adapter as any).agentConnection = null;
       const params: SetSessionModeRequest = {
         sessionId,
-        modeId: 'architect',
+        modeId: 'plan',
       };
 
       // Act
@@ -362,12 +362,12 @@ describe('CursorAgentAdapter - Session Mode Notifications', () => {
 
       // Assert
       expect(result).toBeDefined();
-      expect(result._meta?.newMode).toBe('architect');
+      expect(result._meta?.newMode).toBe('plan');
 
       // Verify mode was actually changed
       const sessionManager = (adapter as any).sessionManager;
       const currentMode = sessionManager.getSessionMode(sessionId);
-      expect(currentMode).toBe('architect');
+      expect(currentMode).toBe('plan');
     });
 
     it('should not log debug message when agentConnection is not available', async () => {
@@ -378,7 +378,7 @@ describe('CursorAgentAdapter - Session Mode Notifications', () => {
       // Act
       await (adapter as any).handleSetSessionModeFromAgent({
         sessionId,
-        modeId: 'code',
+        modeId: 'agent',
       });
 
       // Assert - Debug log should not mention notification
@@ -396,7 +396,7 @@ describe('CursorAgentAdapter - Session Mode Notifications', () => {
       // Act
       await (adapter as any).handleSetSessionModeFromAgent({
         sessionId,
-        modeId: 'code',
+        modeId: 'agent',
       });
 
       // Assert - No warnings about notification failures
@@ -410,7 +410,7 @@ describe('CursorAgentAdapter - Session Mode Notifications', () => {
       // Act - Change mode without connection
       await (adapter as any).handleSetSessionModeFromAgent({
         sessionId,
-        modeId: 'code',
+        modeId: 'agent',
       });
 
       // Assert - No notification sent
@@ -422,7 +422,7 @@ describe('CursorAgentAdapter - Session Mode Notifications', () => {
       // Act - Change mode with connection
       await (adapter as any).handleSetSessionModeFromAgent({
         sessionId,
-        modeId: 'architect',
+        modeId: 'plan',
       });
 
       // Assert - Notification should be sent now
@@ -437,7 +437,7 @@ describe('CursorAgentAdapter - Session Mode Notifications', () => {
       await expect(
         (adapter as any).handleSetSessionModeFromAgent({
           sessionId,
-          modeId: 'code',
+          modeId: 'agent',
         })
       ).resolves.not.toThrow();
     });
@@ -451,7 +451,7 @@ describe('CursorAgentAdapter - Session Mode Notifications', () => {
       // Act
       await (adapter as any).handleSetSessionModeFromAgent({
         sessionId,
-        modeId: 'code',
+        modeId: 'agent',
       });
 
       // Assert
@@ -466,7 +466,7 @@ describe('CursorAgentAdapter - Session Mode Notifications', () => {
       // Act
       await (adapter as any).handleSetSessionModeFromAgent({
         sessionId,
-        modeId: 'code',
+        modeId: 'agent',
       });
 
       // Assert
@@ -481,7 +481,7 @@ describe('CursorAgentAdapter - Session Mode Notifications', () => {
       // Act
       await (adapter as any).handleSetSessionModeFromAgent({
         sessionId,
-        modeId: 'code',
+        modeId: 'agent',
       });
 
       // Assert - Per ACP spec, only currentModeId is in notification
@@ -497,14 +497,14 @@ describe('CursorAgentAdapter - Session Mode Notifications', () => {
       // Act
       await (adapter as any).handleSetSessionModeFromAgent({
         sessionId,
-        modeId: 'architect',
+        modeId: 'plan',
       });
 
       // Assert - Per ACP spec, field is currentModeId
       const notification = mockAgentConnection.sessionUpdate.mock.calls[0][0];
       expect(notification.update).toHaveProperty('currentModeId');
       expect(notification.update).not.toHaveProperty('modeId');
-      expect(notification.update.currentModeId).toBe('architect');
+      expect(notification.update.currentModeId).toBe('plan');
     });
   });
 
@@ -518,13 +518,13 @@ describe('CursorAgentAdapter - Session Mode Notifications', () => {
       // Act
       await (adapter as any).handleSetSessionModeFromAgent({
         sessionId,
-        modeId: 'code',
+        modeId: 'agent',
       });
 
       // Assert - Mode should be changed before notification
       const finalMode = sessionManager.getSessionMode(sessionId);
       expect(initialMode).toBe('ask');
-      expect(finalMode).toBe('code');
+      expect(finalMode).toBe('agent');
       expect(mockAgentConnection.sessionUpdate).toHaveBeenCalled();
     });
 
@@ -551,13 +551,13 @@ describe('CursorAgentAdapter - Session Mode Notifications', () => {
       // Act
       const result = (await (adapter as any).handleSetSessionModeFromAgent({
         sessionId,
-        modeId: 'code',
+        modeId: 'agent',
       })) as SetSessionModeResponse;
 
       // Assert - Response should include metadata
       expect(result._meta).toBeDefined();
       expect(result._meta?.previousMode).toBe('ask');
-      expect(result._meta?.newMode).toBe('code');
+      expect(result._meta?.newMode).toBe('agent');
       expect(result._meta?.changedAt).toBeDefined();
       expect(new Date(result._meta!.changedAt!).getTime()).toBeLessThanOrEqual(
         Date.now()

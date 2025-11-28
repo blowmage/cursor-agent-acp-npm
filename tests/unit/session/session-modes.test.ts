@@ -66,15 +66,15 @@ describe('SessionManager - Session Modes', () => {
       });
     });
 
-    it('should include standard ACP modes', () => {
+    it('should include standard ACP modes matching Cursor IDE', () => {
       // Act
       const modes = manager.getAvailableModes();
       const modeIds = modes.map((m) => m.id);
 
-      // Assert - Per ACP spec examples: ask, architect, code
+      // Assert - Modes should match Cursor IDE: agent, plan, ask
       expect(modeIds).toContain('ask');
-      expect(modeIds).toContain('architect');
-      expect(modeIds).toContain('code');
+      expect(modeIds).toContain('plan');
+      expect(modeIds).toContain('agent');
     });
 
     it('should return modes with proper descriptions', () => {
@@ -83,12 +83,12 @@ describe('SessionManager - Session Modes', () => {
 
       // Assert
       const askMode = modes.find((m) => m.id === 'ask');
-      const architectMode = modes.find((m) => m.id === 'architect');
-      const codeMode = modes.find((m) => m.id === 'code');
+      const planMode = modes.find((m) => m.id === 'plan');
+      const agentMode = modes.find((m) => m.id === 'agent');
 
       expect(askMode?.description).toContain('permission');
-      expect(architectMode?.description).toContain('plan');
-      expect(codeMode?.description).toContain('code');
+      expect(planMode?.description).toContain('plan');
+      expect(agentMode?.description).toContain('code');
     });
   });
 
@@ -134,13 +134,13 @@ describe('SessionManager - Session Modes', () => {
 
     it('should reflect updated mode after setSessionMode', async () => {
       // Arrange
-      await manager.setSessionMode(testSession.id, 'code');
+      await manager.setSessionMode(testSession.id, 'agent');
 
       // Act
       const modeState = manager.getSessionModeState(testSession.id);
 
       // Assert
-      expect(modeState.currentModeId).toBe('code');
+      expect(modeState.currentModeId).toBe('agent');
     });
   });
 
@@ -174,7 +174,7 @@ describe('SessionManager - Session Modes', () => {
   describe('setSessionMode', () => {
     it('should change session mode successfully', async () => {
       // Arrange
-      const newMode: SessionModeId = 'code';
+      const newMode: SessionModeId = 'agent';
 
       // Act
       const previousMode = await manager.setSessionMode(
@@ -184,7 +184,7 @@ describe('SessionManager - Session Modes', () => {
 
       // Assert
       expect(previousMode).toBe('ask'); // Original mode
-      expect(manager.getSessionMode(testSession.id)).toBe('code');
+      expect(manager.getSessionMode(testSession.id)).toBe('agent');
     });
 
     it('should validate mode exists in availableModes', async () => {
@@ -216,16 +216,13 @@ describe('SessionManager - Session Modes', () => {
 
     it('should return previous mode ID', async () => {
       // Arrange
-      await manager.setSessionMode(testSession.id, 'code');
+      await manager.setSessionMode(testSession.id, 'agent');
 
       // Act
-      const previousMode = await manager.setSessionMode(
-        testSession.id,
-        'architect'
-      );
+      const previousMode = await manager.setSessionMode(testSession.id, 'plan');
 
       // Assert
-      expect(previousMode).toBe('code');
+      expect(previousMode).toBe('agent');
     });
 
     it('should allow switching to same mode', async () => {
@@ -245,7 +242,7 @@ describe('SessionManager - Session Modes', () => {
 
     it('should update session metadata with new mode', async () => {
       // Arrange
-      const newMode: SessionModeId = 'architect';
+      const newMode: SessionModeId = 'plan';
 
       // Act
       await manager.setSessionMode(testSession.id, newMode);
@@ -262,7 +259,7 @@ describe('SessionManager - Session Modes', () => {
       await new Promise((resolve) => setTimeout(resolve, 10)); // Small delay
 
       // Act
-      await manager.setSessionMode(testSession.id, 'code');
+      await manager.setSessionMode(testSession.id, 'agent');
 
       // Assert
       const session = await manager.loadSession(testSession.id);
@@ -274,7 +271,7 @@ describe('SessionManager - Session Modes', () => {
     it('should throw error for non-existent session', async () => {
       // Act & Assert
       await expect(
-        manager.setSessionMode('non-existent-id', 'code')
+        manager.setSessionMode('non-existent-id', 'agent')
       ).rejects.toThrow(SessionError);
     });
 
@@ -296,13 +293,13 @@ describe('SessionManager - Session Modes', () => {
     it('should return internal config for valid mode', () => {
       // Act
       const askConfig = manager.getModeConfig('ask');
-      const codeConfig = manager.getModeConfig('code');
-      const architectConfig = manager.getModeConfig('architect');
+      const agentConfig = manager.getModeConfig('agent');
+      const planConfig = manager.getModeConfig('plan');
 
       // Assert
       expect(askConfig).toBeDefined();
-      expect(codeConfig).toBeDefined();
-      expect(architectConfig).toBeDefined();
+      expect(agentConfig).toBeDefined();
+      expect(planConfig).toBeDefined();
     });
 
     it('should return undefined for invalid mode', () => {
@@ -358,65 +355,65 @@ describe('SessionManager - Session Modes', () => {
       });
     });
 
-    describe('code mode configuration', () => {
+    describe('agent mode configuration', () => {
       it('should have strict permission behavior', () => {
         // Act
-        const codeConfig = manager.getModeConfig('code');
+        const agentConfig = manager.getModeConfig('agent');
 
         // Assert
-        expect(codeConfig).toBeDefined();
-        expect(codeConfig?.permissionBehavior).toBe('strict');
+        expect(agentConfig).toBeDefined();
+        expect(agentConfig?.permissionBehavior).toBe('strict');
       });
 
       it('should include filesystem and terminal tools', () => {
         // Act
-        const codeConfig = manager.getModeConfig('code');
+        const agentConfig = manager.getModeConfig('agent');
 
         // Assert
-        expect(codeConfig?.availableTools).toBeDefined();
-        expect(Array.isArray(codeConfig?.availableTools)).toBe(true);
-        expect(codeConfig?.availableTools).toContain('filesystem');
-        expect(codeConfig?.availableTools).toContain('terminal');
-        expect(codeConfig?.availableTools?.length).toBe(2);
+        expect(agentConfig?.availableTools).toBeDefined();
+        expect(Array.isArray(agentConfig?.availableTools)).toBe(true);
+        expect(agentConfig?.availableTools).toContain('filesystem');
+        expect(agentConfig?.availableTools).toContain('terminal');
+        expect(agentConfig?.availableTools?.length).toBe(2);
       });
 
       it('should have both filesystem and terminal in correct order', () => {
         // Act
-        const codeConfig = manager.getModeConfig('code');
+        const agentConfig = manager.getModeConfig('agent');
 
         // Assert
-        expect(codeConfig?.availableTools).toEqual(['filesystem', 'terminal']);
+        expect(agentConfig?.availableTools).toEqual(['filesystem', 'terminal']);
       });
     });
 
-    describe('architect mode configuration', () => {
+    describe('plan mode configuration', () => {
       it('should have strict permission behavior', () => {
         // Act
-        const architectConfig = manager.getModeConfig('architect');
+        const planConfig = manager.getModeConfig('plan');
 
         // Assert
-        expect(architectConfig).toBeDefined();
-        expect(architectConfig?.permissionBehavior).toBe('strict');
+        expect(planConfig).toBeDefined();
+        expect(planConfig?.permissionBehavior).toBe('strict');
       });
 
       it('should include only filesystem tool', () => {
         // Act
-        const architectConfig = manager.getModeConfig('architect');
+        const planConfig = manager.getModeConfig('plan');
 
         // Assert
-        expect(architectConfig?.availableTools).toBeDefined();
-        expect(Array.isArray(architectConfig?.availableTools)).toBe(true);
-        expect(architectConfig?.availableTools).toContain('filesystem');
-        expect(architectConfig?.availableTools).not.toContain('terminal');
-        expect(architectConfig?.availableTools?.length).toBe(1);
+        expect(planConfig?.availableTools).toBeDefined();
+        expect(Array.isArray(planConfig?.availableTools)).toBe(true);
+        expect(planConfig?.availableTools).toContain('filesystem');
+        expect(planConfig?.availableTools).not.toContain('terminal');
+        expect(planConfig?.availableTools?.length).toBe(1);
       });
 
       it('should not include terminal tool', () => {
         // Act
-        const architectConfig = manager.getModeConfig('architect');
+        const planConfig = manager.getModeConfig('plan');
 
-        // Assert - Architect mode is for planning, not executing
-        expect(architectConfig?.availableTools).toEqual(['filesystem']);
+        // Assert - Plan mode is for planning, not executing
+        expect(planConfig?.availableTools).toEqual(['filesystem']);
       });
     });
 
@@ -451,8 +448,8 @@ describe('SessionManager - Session Modes', () => {
 
       it('should return consistent config for same mode', () => {
         // Act
-        const config1 = manager.getModeConfig('code');
-        const config2 = manager.getModeConfig('code');
+        const config1 = manager.getModeConfig('agent');
+        const config2 = manager.getModeConfig('agent');
 
         // Assert - Should return same reference/equivalent config
         expect(config1).toEqual(config2);
@@ -461,10 +458,10 @@ describe('SessionManager - Session Modes', () => {
       it('should return different configs for different modes', () => {
         // Act
         const askConfig = manager.getModeConfig('ask');
-        const codeConfig = manager.getModeConfig('code');
+        const agentConfig = manager.getModeConfig('agent');
 
         // Assert - Configs should be different
-        expect(askConfig).not.toEqual(codeConfig);
+        expect(askConfig).not.toEqual(agentConfig);
       });
     });
 
@@ -493,7 +490,7 @@ describe('SessionManager - Session Modes', () => {
 
         // Assert
         expect(configCount).toBe(3);
-        expect(modeIds).toEqual(['ask', 'architect', 'code']);
+        expect(modeIds).toEqual(['agent', 'plan', 'ask']);
       });
     });
 
@@ -511,32 +508,32 @@ describe('SessionManager - Session Modes', () => {
     });
 
     describe('tool availability patterns', () => {
-      it('should have increasing tool availability: ask < architect < code', () => {
+      it('should have increasing tool availability: ask < plan < agent', () => {
         // Act
         const askConfig = manager.getModeConfig('ask');
-        const architectConfig = manager.getModeConfig('architect');
-        const codeConfig = manager.getModeConfig('code');
+        const planConfig = manager.getModeConfig('plan');
+        const agentConfig = manager.getModeConfig('agent');
 
         // Assert - Tool availability increases
         const askTools = askConfig?.availableTools?.length ?? 0;
-        const architectTools = architectConfig?.availableTools?.length ?? 0;
-        const codeTools = codeConfig?.availableTools?.length ?? 0;
+        const planTools = planConfig?.availableTools?.length ?? 0;
+        const agentTools = agentConfig?.availableTools?.length ?? 0;
 
-        expect(askTools).toBeLessThanOrEqual(architectTools);
-        expect(architectTools).toBeLessThan(codeTools);
+        expect(askTools).toBeLessThanOrEqual(planTools);
+        expect(planTools).toBeLessThan(agentTools);
       });
 
-      it('code mode should have superset of architect tools', () => {
+      it('agent mode should have superset of plan tools', () => {
         // Act
-        const architectConfig = manager.getModeConfig('architect');
-        const codeConfig = manager.getModeConfig('code');
+        const planConfig = manager.getModeConfig('plan');
+        const agentConfig = manager.getModeConfig('agent');
 
-        // Assert - Code should include all architect tools
-        const architectTools = architectConfig?.availableTools ?? [];
-        const codeTools = codeConfig?.availableTools ?? [];
+        // Assert - Agent should include all plan tools
+        const planTools = planConfig?.availableTools ?? [];
+        const agentTools = agentConfig?.availableTools ?? [];
 
-        architectTools.forEach((tool) => {
-          expect(codeTools).toContain(tool);
+        planTools.forEach((tool) => {
+          expect(agentTools).toContain(tool);
         });
       });
     });
@@ -545,11 +542,11 @@ describe('SessionManager - Session Modes', () => {
   describe('Session creation with mode', () => {
     it('should create session with specified mode', async () => {
       // Act
-      const session = await manager.createSession({ mode: 'code' });
+      const session = await manager.createSession({ mode: 'agent' });
 
       // Assert
-      expect(session.state.currentMode).toBe('code');
-      expect(session.metadata.mode).toBe('code');
+      expect(session.state.currentMode).toBe('agent');
+      expect(session.metadata.mode).toBe('agent');
     });
 
     it('should create session with default mode if not specified', async () => {

@@ -222,8 +222,8 @@ describe('Session Modes Integration', () => {
       // Assert
       const modeIds = result.modes?.availableModes.map((m) => m.id) || [];
       expect(modeIds).toContain('ask');
-      expect(modeIds).toContain('architect');
-      expect(modeIds).toContain('code');
+      expect(modeIds).toContain('plan');
+      expect(modeIds).toContain('agent');
     });
 
     it('should validate SessionMode structure per ACP spec', async () => {
@@ -323,7 +323,7 @@ describe('Session Modes Integration', () => {
         method: 'session/set_mode',
         params: {
           sessionId,
-          modeId: 'code',
+          modeId: 'agent',
         },
       });
 
@@ -342,7 +342,7 @@ describe('Session Modes Integration', () => {
       const result = response.result as LoadSessionResponse;
 
       // Assert
-      expect(result.modes?.currentModeId).toBe('code');
+      expect(result.modes?.currentModeId).toBe('agent');
     });
   });
 
@@ -374,7 +374,7 @@ describe('Session Modes Integration', () => {
         method: 'session/set_mode',
         params: {
           sessionId,
-          modeId: 'code',
+          modeId: 'agent',
         } as SetSessionModeRequest,
       };
 
@@ -394,7 +394,7 @@ describe('Session Modes Integration', () => {
         method: 'session/set_mode',
         params: {
           sessionId,
-          modeId: 'architect',
+          modeId: 'plan',
         } as SetSessionModeRequest,
       };
 
@@ -409,7 +409,7 @@ describe('Session Modes Integration', () => {
         expect(result._meta).toHaveProperty('previousMode');
         expect(result._meta).toHaveProperty('newMode');
         expect(result._meta.previousMode).toBe('ask');
-        expect(result._meta.newMode).toBe('architect');
+        expect(result._meta.newMode).toBe('plan');
       }
     });
 
@@ -441,7 +441,7 @@ describe('Session Modes Integration', () => {
         method: 'session/set_mode',
         params: {
           sessionId,
-          modeId: 'code',
+          modeId: 'agent',
         },
       });
 
@@ -459,7 +459,7 @@ describe('Session Modes Integration', () => {
 
       // Assert
       const result = loadResponse.result as LoadSessionResponse;
-      expect(result.modes?.currentModeId).toBe('code');
+      expect(result.modes?.currentModeId).toBe('agent');
     });
 
     it('should allow switching between all available modes', async () => {
@@ -536,7 +536,7 @@ describe('Session Modes Integration', () => {
         method: 'session/set_mode',
         params: {
           sessionId,
-          modeId: 'architect',
+          modeId: 'plan',
         },
       });
 
@@ -555,7 +555,7 @@ describe('Session Modes Integration', () => {
 
       // Assert - availableModes should be consistent
       expect(createModes?.availableModes).toEqual(loadModes?.availableModes);
-      expect(loadModes?.currentModeId).toBe('architect');
+      expect(loadModes?.currentModeId).toBe('plan');
     });
   });
 });

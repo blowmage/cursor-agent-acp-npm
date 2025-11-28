@@ -531,6 +531,12 @@ export class CursorCliBridge {
           content.value,
         ];
 
+        // Add model if specified in metadata
+        const model = metadata?.['model'] as string | undefined;
+        if (model) {
+          args.unshift('--model', model);
+        }
+
         // If we have a sessionId, try to resume that chat
         if (sessionId && sessionId !== 'new') {
           args.unshift('--resume', sessionId);
@@ -539,6 +545,7 @@ export class CursorCliBridge {
         this.logger.debug('Executing cursor-agent command', {
           args,
           cwd: workingDir,
+          model: model || 'default',
         });
         this.logger.info(
           `Running: cursor-agent ${args.join(' ')} (cwd: ${workingDir})`
@@ -637,13 +644,15 @@ export class CursorCliBridge {
     });
 
     try {
-      // Extract working directory from metadata
+      // Extract working directory and model from metadata
       const workingDir =
         (metadata?.['cwd'] as string | undefined) || process.cwd();
+      const model = metadata?.['model'] as string | undefined;
 
       this.logger.info('Sending streaming prompt to Cursor CLI', {
         sessionId,
         cwd: workingDir,
+        model: model || 'default',
       });
 
       const args = [
@@ -655,6 +664,11 @@ export class CursorCliBridge {
         '--force',
         content.value,
       ];
+
+      // Add model if specified
+      if (model) {
+        args.unshift('--model', model);
+      }
 
       // If we have a sessionId, try to resume that chat
       if (sessionId && sessionId !== 'new') {
