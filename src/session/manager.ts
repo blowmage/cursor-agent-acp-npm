@@ -45,21 +45,22 @@ export class SessionManager {
 
   // Session modes per ACP spec
   // Using SDK SessionMode type for ACP compliance
+  // Matches Cursor IDE mode names and order: Agent, Plan, Ask
   private readonly availableModes: SessionMode[] = [
+    {
+      id: 'agent',
+      name: 'Agent',
+      description: 'Write and modify code with full tool access',
+    },
+    {
+      id: 'plan',
+      name: 'Plan',
+      description: 'Design and plan software systems without implementation',
+    },
     {
       id: 'ask',
       name: 'Ask',
       description: 'Request permission before making any changes',
-    },
-    {
-      id: 'architect',
-      name: 'Architect',
-      description: 'Design and plan software systems without implementation',
-    },
-    {
-      id: 'code',
-      name: 'Code',
-      description: 'Write and modify code with full tool access',
     },
   ];
 
@@ -68,24 +69,105 @@ export class SessionManager {
     new Map([
       ['ask', { permissionBehavior: 'strict' }],
       [
-        'code',
+        'agent',
         {
           availableTools: ['filesystem', 'terminal'],
           permissionBehavior: 'strict',
         },
       ],
       [
-        'architect',
+        'plan',
         { availableTools: ['filesystem'], permissionBehavior: 'strict' },
       ],
     ]);
 
-  // Available models (can be extended)
+  // Available models (synced with cursor-agent CLI)
+  // Models discovered from: cursor-agent --model unknown
   private readonly availableModels: SessionModel[] = [
     {
-      id: 'cursor-default',
-      name: 'Cursor Default Model',
+      id: 'composer-1',
+      name: 'Composer 1',
       provider: 'cursor',
+    },
+    {
+      id: 'auto',
+      name: 'Auto (Cursor Default)',
+      provider: 'cursor',
+    },
+    {
+      id: 'sonnet-4.5',
+      name: 'Claude Sonnet 4.5',
+      provider: 'anthropic',
+    },
+    {
+      id: 'sonnet-4.5-thinking',
+      name: 'Claude Sonnet 4.5 (Thinking)',
+      provider: 'anthropic',
+    },
+    {
+      id: 'opus-4.5',
+      name: 'Claude Opus 4.5',
+      provider: 'anthropic',
+    },
+    {
+      id: 'opus-4.5-thinking',
+      name: 'Claude Opus 4.5 (Thinking)',
+      provider: 'anthropic',
+    },
+    {
+      id: 'gemini-3-pro',
+      name: 'Gemini 3 Pro',
+      provider: 'google',
+    },
+    {
+      id: 'gpt-5',
+      name: 'GPT-5',
+      provider: 'openai',
+    },
+    {
+      id: 'gpt-5.1',
+      name: 'GPT-5.1',
+      provider: 'openai',
+    },
+    {
+      id: 'gpt-5-high',
+      name: 'GPT-5 High',
+      provider: 'openai',
+    },
+    {
+      id: 'gpt-5.1-high',
+      name: 'GPT-5.1 High',
+      provider: 'openai',
+    },
+    {
+      id: 'gpt-5-codex',
+      name: 'GPT-5 Codex',
+      provider: 'openai',
+    },
+    {
+      id: 'gpt-5-codex-high',
+      name: 'GPT-5 Codex High',
+      provider: 'openai',
+    },
+    {
+      id: 'gpt-5.1-codex',
+      name: 'GPT-5.1 Codex',
+      provider: 'openai',
+    },
+    {
+      id: 'gpt-5.1-codex-high',
+      name: 'GPT-5.1 Codex High',
+      provider: 'openai',
+    },
+    {
+      id: 'opus-4.1',
+      name: 'Claude Opus 4.1',
+      provider: 'anthropic',
+    },
+    {
+      id: 'grok',
+      name: 'Grok',
+      provider: 'xai',
     },
   ];
 
@@ -127,7 +209,7 @@ export class SessionManager {
       // Create session data
       const now = new Date();
       const defaultMode = 'ask';
-      const defaultModel = 'cursor-default';
+      const defaultModel = 'auto';
 
       const sessionData: SessionData = {
         id: sessionId,
@@ -425,7 +507,7 @@ export class SessionManager {
    */
   getSessionModel(sessionId: string): string {
     const session = this.sessions.get(sessionId);
-    return session?.state.currentModel || 'cursor-default';
+    return session?.state.currentModel || 'auto';
   }
 
   /**

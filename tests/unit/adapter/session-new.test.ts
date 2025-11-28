@@ -717,7 +717,7 @@ describe('session/new - Parameter Validation', () => {
       expect(response.result.models.availableModels).toBeDefined();
       expect(Array.isArray(response.result.models.availableModels)).toBe(true);
       expect(response.result.models.currentModelId).toBeDefined();
-      expect(response.result.models.currentModelId).toBe('cursor-default'); // Default model
+      expect(response.result.models.currentModelId).toBe('auto'); // Default model
     });
 
     it('should return proper JSON-RPC 2.0 response structure', async () => {
@@ -951,6 +951,112 @@ describe('session/new - Parameter Validation', () => {
       expect(commandNotifications.length).toBe(0);
 
       await adapterWithNoCommands.shutdown();
+    });
+  });
+
+  describe('model state in response', () => {
+    it('should include models in session/new response', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-1',
+        params: {
+          cwd: '/tmp',
+          mcpServers: [],
+        },
+      };
+
+      const response = await adapter.processRequest(request);
+
+      expect(response.result).toHaveProperty('models');
+      expect(response.result.models).toHaveProperty('availableModels');
+      expect(response.result.models).toHaveProperty('currentModelId');
+    });
+
+    it('should return list of available models', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-1',
+        params: {
+          cwd: '/tmp',
+          mcpServers: [],
+        },
+      };
+
+      const response = await adapter.processRequest(request);
+
+      const models = response.result.models.availableModels;
+      expect(Array.isArray(models)).toBe(true);
+      expect(models.length).toBeGreaterThan(0);
+
+      // Check model structure
+      models.forEach((model: any) => {
+        expect(model).toHaveProperty('modelId');
+        expect(model).toHaveProperty('name');
+        expect(typeof model.modelId).toBe('string');
+        expect(typeof model.name).toBe('string');
+      });
+    });
+
+    it('should include expected models', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-1',
+        params: {
+          cwd: '/tmp',
+          mcpServers: [],
+        },
+      };
+
+      const response = await adapter.processRequest(request);
+
+      const modelIds = response.result.models.availableModels.map(
+        (m: any) => m.modelId
+      );
+
+      // Check for some key models
+      expect(modelIds).toContain('auto');
+      expect(modelIds).toContain('composer-1');
+      expect(modelIds).toContain('sonnet-4.5');
+      expect(modelIds).toContain('gpt-5');
+      expect(modelIds).toContain('grok');
+    });
+
+    it('should set default model as current', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-1',
+        params: {
+          cwd: '/tmp',
+          mcpServers: [],
+        },
+      };
+
+      const response = await adapter.processRequest(request);
+
+      expect(response.result.models.currentModelId).toBe('auto');
+    });
+
+    it('should use custom model when specified in metadata', async () => {
+      const request: AcpRequest = {
+        jsonrpc: '2.0',
+        method: 'session/new',
+        id: 'test-1',
+        params: {
+          cwd: '/tmp',
+          mcpServers: [],
+          metadata: {
+            model: 'sonnet-4.5',
+          },
+        },
+      };
+
+      const response = await adapter.processRequest(request);
+
+      expect(response.result.models.currentModelId).toBe('sonnet-4.5');
     });
   });
 });

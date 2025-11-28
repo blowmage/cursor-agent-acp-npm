@@ -1036,9 +1036,14 @@ export class PromptHandler {
       description: commandDef.description,
     });
 
-    // For now, commands are processed by forwarding to Cursor CLI
+    // Handle special commands that require custom processing
+    if (command === 'model') {
+      return await this.processModelCommand(sessionId, input);
+    }
+
+    // For other commands, they are processed by forwarding to Cursor CLI
     // The command text is included as part of the regular prompt
-    // Future enhancements could add specialized command handlers here
+    // Future enhancements could add more specialized command handlers here
 
     // Log command execution
     this.logger.debug('Slash command will be processed as part of prompt', {
@@ -1047,6 +1052,125 @@ export class PromptHandler {
     });
 
     return true;
+  }
+
+  /**
+   * Process the /model command to change the session's model
+   * Per ACP spec (UNSTABLE): Uses session/set_model request
+   *
+   * @param sessionId - The session ID
+   * @param input - Model ID to switch to
+   * @returns True if model was changed successfully
+   */
+  private async processModelCommand(
+    sessionId: string,
+    input: string
+  ): Promise<boolean> {
+    const modelId = input.trim();
+
+    if (!modelId) {
+      // Send error message to user
+      this.sendNotification({
+        jsonrpc: '2.0',
+        method: 'session/update',
+        params: {
+          sessionId,
+          update: {
+            sessionUpdate: 'agent_message_chunk',
+            content: {
+              type: 'text',
+              text: 'Error: Please specify a model ID. Usage: /model <model-id>',
+            },
+          },
+        },
+      });
+      return false;
+    }
+
+    try {
+      // Get available models for validation
+      const availableModels = this.sessionManager.getAvailableModels();
+      const model = availableModels.find((m) => m.id === modelId);
+
+      if (!model) {
+        // Send error with available models
+        const modelList = availableModels.map((m) => m.id).join(', ');
+        this.sendNotification({
+          jsonrpc: '2.0',
+          method: 'session/update',
+          params: {
+            sessionId,
+            update: {
+              sessionUpdate: 'agent_message_chunk',
+              content: {
+                type: 'text',
+                text: `Error: Unknown model '${modelId}'. Available models: ${modelList}`,
+              },
+            },
+          },
+        });
+        return false;
+      }
+
+      // Get previous model for confirmation message
+      const previousModel = this.sessionManager.getSessionModel(sessionId);
+
+      // Change the model
+      await this.sessionManager.setSessionModel(sessionId, modelId);
+
+      // NOTE: Per ACP spec, current_model_update notification is not yet in the SDK
+      // Model state is communicated via session responses, but dynamic updates are not
+      // yet officially supported. Once SDK adds support, this should send:
+      // sessionUpdate: 'current_model_update', currentModelId: modelId
+
+      // Send success confirmation to user
+      this.sendNotification({
+        jsonrpc: '2.0',
+        method: 'session/update',
+        params: {
+          sessionId,
+          update: {
+            sessionUpdate: 'agent_message_chunk',
+            content: {
+              type: 'text',
+              text: `✓ Switched model from ${previousModel} to ${modelId} (${model.name})`,
+            },
+          },
+        },
+      });
+
+      this.logger.info('Model changed via /model command', {
+        sessionId,
+        previousModel,
+        newModel: modelId,
+      });
+
+      return true;
+    } catch (error) {
+      this.logger.error('Failed to process /model command', {
+        sessionId,
+        modelId,
+        error,
+      });
+
+      // Send error message
+      this.sendNotification({
+        jsonrpc: '2.0',
+        method: 'session/update',
+        params: {
+          sessionId,
+          update: {
+            sessionUpdate: 'agent_message_chunk',
+            content: {
+              type: 'text',
+              text: `Error: Failed to change model: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          },
+        },
+      });
+
+      return false;
+    }
   }
 
   /**
@@ -1065,14 +1189,16 @@ export class PromptHandler {
     const { sessionId, content, metadata } = params;
 
     try {
-      // Load session to get working directory
+      // Load session to get working directory and model
       const session = await this.sessionManager.loadSession(sessionId);
       const workingDir =
         (session.metadata['cwd'] as string | undefined) || process.cwd();
+      const currentModel = this.sessionManager.getSessionModel(sessionId);
 
-      this.logger.debug('Processing prompt with working directory', {
+      this.logger.debug('Processing prompt with working directory and model', {
         sessionId,
         cwd: workingDir,
+        model: currentModel,
       });
 
       // Detect slash command in content
@@ -1109,11 +1235,11 @@ export class PromptHandler {
       const processedContent =
         await this.contentProcessor.processContent(content);
 
-      // Send to Cursor CLI with working directory
+      // Send to Cursor CLI with working directory and model
       const cursorResponse = await this.cursorBridge.sendPrompt({
         sessionId,
         content: processedContent,
-        metadata: { ...metadata, cwd: workingDir },
+        metadata: { ...metadata, cwd: workingDir, model: currentModel },
       });
 
       if (!cursorResponse.success) {
@@ -1231,15 +1357,20 @@ export class PromptHandler {
     this.activeSessionRequests.get(sessionId)!.add(abortController);
 
     try {
-      // Load session to get working directory
+      // Load session to get working directory and model
       const session = await this.sessionManager.loadSession(sessionId);
       const workingDir =
         (session.metadata['cwd'] as string | undefined) || process.cwd();
+      const currentModel = this.sessionManager.getSessionModel(sessionId);
 
-      this.logger.debug('Processing streaming prompt with working directory', {
-        sessionId,
-        cwd: workingDir,
-      });
+      this.logger.debug(
+        'Processing streaming prompt with working directory and model',
+        {
+          sessionId,
+          cwd: workingDir,
+          model: currentModel,
+        }
+      );
 
       // Add user message to session
       const userMessage: ConversationMessage = {
@@ -1266,12 +1397,12 @@ export class PromptHandler {
       // Initialize streaming state in content processor
       this.contentProcessor.startStreaming();
 
-      // Send streaming request to Cursor CLI with working directory
+      // Send streaming request to Cursor CLI with working directory and model
       const streamResponse = await this.cursorBridge.sendStreamingPrompt({
         sessionId,
         content: processedContent,
         ...(metadata !== undefined && {
-          metadata: { ...metadata, cwd: workingDir },
+          metadata: { ...metadata, cwd: workingDir, model: currentModel },
         }),
         abortSignal: abortController.signal,
         onChunk: async (chunk: StreamChunk) => {

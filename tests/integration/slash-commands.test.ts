@@ -578,4 +578,64 @@ describe('Slash Commands Integration', () => {
       expect(mockCallback).toHaveBeenCalled();
     });
   });
+
+  describe('/model Command', () => {
+    it('should include /model command in available commands', async () => {
+      const request = {
+        jsonrpc: '2.0' as const,
+        id: 1,
+        method: 'session/new' as const,
+        params: {
+          cwd: process.cwd(),
+        },
+      };
+
+      await adapter.processRequest(request);
+
+      const commandsNotification = capturedNotifications.find(
+        (n) =>
+          n.method === 'session/update' &&
+          n.params?.update?.sessionUpdate === 'available_commands_update'
+      );
+
+      const commands = commandsNotification.params.update.availableCommands;
+      const modelCommand = commands.find(
+        (c: AvailableCommand) => c.name === 'model'
+      );
+
+      expect(modelCommand).toBeDefined();
+      expect(modelCommand.description).toContain('Switch to a different model');
+      expect(modelCommand.input).toBeDefined();
+      expect(modelCommand.input.hint).toBe('model-id');
+    });
+
+    it('should list available models in /model command description', async () => {
+      const request = {
+        jsonrpc: '2.0' as const,
+        id: 1,
+        method: 'session/new' as const,
+        params: {
+          cwd: process.cwd(),
+        },
+      };
+
+      await adapter.processRequest(request);
+
+      const commandsNotification = capturedNotifications.find(
+        (n) =>
+          n.method === 'session/update' &&
+          n.params?.update?.sessionUpdate === 'available_commands_update'
+      );
+
+      const commands = commandsNotification.params.update.availableCommands;
+      const modelCommand = commands.find(
+        (c: AvailableCommand) => c.name === 'model'
+      );
+
+      // Description should mention some models
+      expect(modelCommand.description).toContain('auto');
+      expect(modelCommand.description).toContain('sonnet-4.5');
+      expect(modelCommand.description).toContain('gpt-5');
+    });
+  });
 });

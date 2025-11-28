@@ -29,6 +29,9 @@ const mockSessionManager = {
   cleanup: jest.fn(),
   markSessionProcessing: jest.fn(),
   unmarkSessionProcessing: jest.fn(),
+  getSessionModel: jest.fn(),
+  setSessionModel: jest.fn(),
+  getAvailableModels: jest.fn(),
 };
 
 const mockCursorBridge = {
@@ -86,6 +89,9 @@ describe('PromptHandler', () => {
       'what to plan'
     );
     mockSlashCommandsRegistry.registerCommand('web', 'Search the web', 'query');
+
+    // Clear mock calls from command registration
+    jest.clearAllMocks();
 
     mockSendNotification = jest.fn();
 
@@ -1224,6 +1230,8 @@ describe('PromptHandler', () => {
         createdAt: new Date(),
         updatedAt: new Date(),
       });
+
+      mockSessionManager.getSessionModel.mockReturnValue('auto');
 
       mockCursorBridge.sendPrompt.mockResolvedValue({
         success: true,
