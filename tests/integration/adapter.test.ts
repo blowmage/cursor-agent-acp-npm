@@ -72,6 +72,16 @@ describe('CursorAgentAdapter Integration', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    // Reset the CursorCliBridge mock to default implementation
+    const { CursorCliBridge } = require('../../src/cursor/cli-bridge');
+    CursorCliBridge.mockReset();
+    CursorCliBridge.mockImplementation((config, logger) => {
+      return new (require('./mocks/cursor-bridge-mock').MockCursorCliBridge)(
+        config,
+        logger
+      );
+    });
+
     adapter = new CursorAgentAdapter(testConfig, { logger: mockLogger });
     await adapter.initialize();
 
@@ -187,6 +197,106 @@ describe('CursorAgentAdapter Integration', () => {
         });
         await invalidAdapter.initialize();
       }).rejects.toThrow();
+    });
+
+    it('should initialize successfully even if cursor-agent CLI is not installed (non-blocking)', async () => {
+      // Mock CursorCliBridge to simulate "not installed" error
+      const { CursorCliBridge } = require('../../src/cursor/cli-bridge');
+
+      // Store original implementation
+      const originalMock = CursorCliBridge.getMockImplementation();
+
+      CursorCliBridge.mockImplementation((config, logger) => {
+        const mockBridge = {
+          getVersion: jest
+            .fn()
+            .mockRejectedValue(new Error('spawn cursor-agent ENOENT')),
+          checkAuthentication: jest.fn(),
+          close: jest.fn().mockResolvedValue(undefined),
+        };
+        return mockBridge;
+      });
+
+      const adapterWithError = new CursorAgentAdapter(testConfig, {
+        logger: mockLogger,
+      });
+
+      // Should not throw - initialization should succeed
+      await expect(adapterWithError.initialize()).resolves.not.toThrow();
+
+      // Verify warning was logged (check for the actual message format)
+      const warnCalls = mockLogger.warn.mock.calls;
+      const foundWarning = warnCalls.some(
+        (call) =>
+          typeof call[0] === 'string' &&
+          call[0].includes('cursor-agent CLI not found')
+      );
+      expect(foundWarning).toBe(true);
+
+      // Cleanup
+      await adapterWithError.shutdown();
+
+      // Restore original mock implementation
+      if (originalMock) {
+        CursorCliBridge.mockImplementation(originalMock);
+      } else {
+        CursorCliBridge.mockReset();
+        CursorCliBridge.mockImplementation((config, logger) => {
+          return new (require('./mocks/cursor-bridge-mock').MockCursorCliBridge)(
+            config,
+            logger
+          );
+        });
+      }
+    });
+
+    it('should initialize successfully even if cursor-agent CLI is not authenticated (non-blocking)', async () => {
+      // Mock CursorCliBridge to simulate "not authenticated" error
+      const { CursorCliBridge } = require('../../src/cursor/cli-bridge');
+
+      // Store original implementation
+      const originalMock = CursorCliBridge.getMockImplementation();
+
+      CursorCliBridge.mockImplementation((config, logger) => {
+        const mockBridge = {
+          getVersion: jest.fn().mockResolvedValue('1.2.3'),
+          checkAuthentication: jest.fn().mockResolvedValue({
+            authenticated: false,
+            error: 'User not authenticated',
+          }),
+          close: jest.fn().mockResolvedValue(undefined),
+        };
+        return mockBridge;
+      });
+
+      const adapterWithAuthError = new CursorAgentAdapter(testConfig, {
+        logger: mockLogger,
+      });
+
+      // Should not throw - initialization should succeed
+      await expect(adapterWithAuthError.initialize()).resolves.not.toThrow();
+
+      // Verify warning was logged
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('not authenticated'),
+        expect.any(Object)
+      );
+
+      // Cleanup
+      await adapterWithAuthError.shutdown();
+
+      // Restore original mock implementation
+      if (originalMock) {
+        CursorCliBridge.mockImplementation(originalMock);
+      } else {
+        CursorCliBridge.mockReset();
+        CursorCliBridge.mockImplementation((config, logger) => {
+          return new (require('./mocks/cursor-bridge-mock').MockCursorCliBridge)(
+            config,
+            logger
+          );
+        });
+      }
     });
   });
 

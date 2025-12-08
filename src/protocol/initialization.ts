@@ -23,6 +23,7 @@ import {
   type AdapterConfig,
   type Logger,
   type ConnectivityTestResult,
+  type CursorAuthStatus,
 } from '../types';
 
 /**
@@ -117,6 +118,12 @@ export class InitializationHandler {
         getRegisteredNotifications: () => string[];
       }
     | undefined;
+  private getCursorBridge?: () =>
+    | {
+        getVersion: () => Promise<string>;
+        checkAuthentication: () => Promise<CursorAuthStatus>;
+      }
+    | undefined;
 
   constructor(
     config: AdapterConfig,
@@ -143,6 +150,23 @@ export class InitializationHandler {
       | undefined
   ): void {
     this.getExtensionRegistry = getter;
+  }
+
+  /**
+   * Set Cursor CLI bridge getter for testing connectivity during initialization
+   * Allows InitializationHandler to check if cursor-agent CLI is available and authenticated
+   *
+   * @param getter - Function that returns CursorCliBridge or undefined
+   */
+  setCursorBridgeGetter(
+    getter: () =>
+      | {
+          getVersion: () => Promise<string>;
+          checkAuthentication: () => Promise<CursorAuthStatus>;
+        }
+      | undefined
+  ): void {
+    this.getCursorBridge = getter;
   }
 
   /**
@@ -381,6 +405,28 @@ export class InitializationHandler {
             : 'unavailable',
           cursorVersion: connectivityTest?.version,
           cursorAuthenticated: connectivityTest?.authenticated,
+
+          // Provide helpful guidance when cursor-agent is unavailable
+          ...(connectivityTest &&
+            !connectivityTest.success && {
+              cursorCliGuidance: {
+                issue:
+                  connectivityTest.error || 'cursor-agent CLI not available',
+                ...(connectivityTest.error?.includes('not installed') && {
+                  resolution:
+                    'Install cursor-agent CLI: https://cursor.sh/docs/agent',
+                }),
+              },
+            }),
+
+          // Provide guidance when cursor-agent is installed but not authenticated
+          ...(connectivityTest?.success &&
+            !connectivityTest.authenticated && {
+              cursorCliGuidance: {
+                issue: connectivityTest.error || 'User not authenticated',
+                resolution: 'Run: cursor-agent login',
+              },
+            }),
 
           // Runtime information (helps with compatibility debugging)
           nodeVersion: process.version,
@@ -903,26 +949,141 @@ export class InitializationHandler {
 
   /**
    * Tests cursor-agent connectivity and authentication
+   * Performs actual checks using CursorCliBridge if available
    */
   private async testCursorConnectivity(): Promise<ConnectivityTestResult> {
-    try {
-      // TODO: Replace with actual cursor-agent connectivity test
-      // For now, return a mock successful result
-      this.logger.debug('Testing cursor-agent connectivity...');
-
-      // Simulate connectivity test
-      await new Promise((resolve) => setTimeout(resolve, 10));
-
-      return {
-        success: true,
-        version: '1.0.0',
-        authenticated: true,
-      };
-    } catch (error) {
-      this.logger.error('Cursor connectivity test failed', error);
+    // If CursorCliBridge is not available, return unavailable status
+    if (!this.getCursorBridge) {
+      this.logger.debug(
+        'CursorCliBridge not available, skipping connectivity test'
+      );
       return {
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: 'CursorCliBridge not initialized',
+      };
+    }
+
+    const cursorBridge = this.getCursorBridge();
+    if (!cursorBridge) {
+      this.logger.debug(
+        'CursorCliBridge getter returned undefined, skipping connectivity test'
+      );
+      return {
+        success: false,
+        error: 'CursorCliBridge not available',
+      };
+    }
+
+    this.logger.debug('Testing cursor-agent connectivity...');
+
+    try {
+      // Test 1: Check if cursor-agent CLI is installed and accessible
+      let version: string;
+      try {
+        version = await cursorBridge.getVersion();
+        this.logger.debug(`cursor-agent version detected: ${version}`);
+      } catch (error) {
+        // Check if this is a "command not found" error
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
+        const isNotFoundError =
+          errorMessage.includes('ENOENT') ||
+          errorMessage.includes('not found') ||
+          errorMessage.includes('command not found') ||
+          errorMessage.includes('spawn cursor-agent ENOENT');
+
+        if (isNotFoundError) {
+          this.logger.warn(
+            'cursor-agent CLI not found in PATH. Please install cursor-agent CLI.',
+            { error: errorMessage }
+          );
+          return {
+            success: false,
+            error: 'cursor-agent CLI not installed or not in PATH',
+          };
+        }
+
+        // Other errors (timeout, permission denied, etc.)
+        this.logger.warn('Failed to get cursor-agent version', {
+          error: errorMessage,
+        });
+        return {
+          success: false,
+          error: `Failed to execute cursor-agent: ${errorMessage}`,
+        };
+      }
+
+      // Test 2: Check authentication status
+      let authStatus: CursorAuthStatus;
+      try {
+        authStatus = await cursorBridge.checkAuthentication();
+        this.logger.debug('cursor-agent authentication check completed', {
+          authenticated: authStatus.authenticated,
+          user: authStatus.user,
+          email: authStatus.email,
+        });
+      } catch (error) {
+        // Authentication check failed - this could mean:
+        // 1. cursor-agent is installed but not authenticated
+        // 2. cursor-agent command failed for another reason
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
+        this.logger.warn('Failed to check cursor-agent authentication', {
+          error: errorMessage,
+        });
+
+        // If we got a version, cursor-agent is installed but auth check failed
+        return {
+          success: true, // CLI is available
+          version,
+          authenticated: false,
+          error: `Authentication check failed: ${errorMessage}`,
+        };
+      }
+
+      // Both checks passed
+      if (authStatus.authenticated) {
+        this.logger.info('cursor-agent connectivity verified', {
+          version,
+          authenticated: true,
+          user: authStatus.user,
+          email: authStatus.email,
+        });
+        return {
+          success: true,
+          version,
+          authenticated: true,
+        };
+      } else {
+        // CLI is available but not authenticated
+        this.logger.warn(
+          'cursor-agent CLI is installed but user is not authenticated',
+          {
+            version,
+            authenticated: false,
+            error: authStatus.error,
+          }
+        );
+        return {
+          success: true, // CLI is available
+          version,
+          authenticated: false,
+          error:
+            authStatus.error ||
+            'User not authenticated. Please run: cursor-agent login',
+        };
+      }
+    } catch (error) {
+      // Unexpected error during connectivity test
+      this.logger.error('Unexpected error during cursor connectivity test', {
+        error,
+      });
+      return {
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : `Unexpected error: ${String(error)}`,
       };
     }
   }

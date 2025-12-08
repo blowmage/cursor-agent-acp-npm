@@ -146,7 +146,10 @@ describe('PromptHandler', () => {
       beforeEach(() => {
         mockSessionManager.loadSession.mockResolvedValue({
           id: 'test-session-1',
-          metadata: { name: 'Test Session' },
+          metadata: {
+            name: 'Test Session',
+            cwd: '/tmp/test-project',
+          },
           conversation: [],
           state: { lastActivity: new Date(), messageCount: 0 },
           createdAt: new Date(),
@@ -528,7 +531,13 @@ describe('PromptHandler', () => {
           sendNotification: mockSendNotification,
         });
 
-        mockSessionManager.loadSession.mockResolvedValue({});
+        mockSessionManager.loadSession.mockResolvedValue({
+          id: 'test-session-1',
+          metadata: {
+            cwd: '/tmp/test-project',
+          },
+        });
+        mockSessionManager.getSessionModel.mockReturnValue('default');
         mockCursorBridge.sendPrompt.mockResolvedValue({
           success: false,
           error: 'Cursor CLI is not available',
@@ -536,10 +545,30 @@ describe('PromptHandler', () => {
 
         const response = await handlerWithMock.processPrompt(validRequest);
 
-        // Per ACP spec: errors during processing should return stopReason: 'refusal'
+        // Per ACP spec: When sending explanation messages, we return 'end_turn' to keep session open
+        // Error details remain in metadata, but stopReason is 'end_turn' so diagnostic info is visible
         expect(response.error).toBeUndefined();
         expect(response.result).toBeDefined();
-        expect(response.result?.stopReason).toBe('refusal');
+        expect(response.result?.stopReason).toBe('end_turn');
+
+        // Verify error explanation was sent via session/update notification
+        const errorNotification = mockSendNotification.mock.calls.find(
+          (call) =>
+            call[0].method === 'session/update' &&
+            call[0].params?.update?.sessionUpdate === 'agent_message_chunk' &&
+            call[0].params?.update?.content?.annotations?._meta?.isError ===
+              true
+        );
+
+        expect(errorNotification).toBeDefined();
+        const content = errorNotification[0].params.update.content;
+        expect(content.annotations._meta.isError).toBe(true);
+        expect(content.annotations._meta.severity).toBe('error');
+        expect(content.annotations._meta.errorType).toBeDefined();
+
+        // Verify error details are in metadata
+        expect(response.result?._meta?.stopReasonDetails).toBeDefined();
+        expect(response.result?._meta?.stopReasonDetails?.reason).toBeDefined();
       });
 
       it('should handle unexpected errors', async () => {
@@ -552,6 +581,137 @@ describe('PromptHandler', () => {
         expect(response.error).toBeDefined();
         expect(response.error?.code).toBe(-32603);
         expect(response.error?.message).toBe('Unexpected database error');
+      });
+
+      it('should send error explanation when cursor-agent CLI is not installed', async () => {
+        const mockSendNotification = jest.fn();
+        const handlerWithMock = new PromptHandler({
+          sessionManager: mockSessionManager as any,
+          cursorBridge: mockCursorBridge as any,
+          config: mockConfig,
+          logger: mockLogger,
+          sendNotification: mockSendNotification,
+        });
+
+        mockSessionManager.loadSession.mockResolvedValue({
+          id: 'test-session-1',
+          metadata: {
+            cwd: '/tmp/test-project',
+          },
+        });
+        mockSessionManager.getSessionModel.mockReturnValue('default');
+        mockCursorBridge.sendPrompt.mockResolvedValue({
+          success: false,
+          error: 'cursor-agent CLI not installed or not in PATH',
+        });
+
+        const response = await handlerWithMock.processPrompt(validRequest);
+
+        expect(response.result?.stopReason).toBe('end_turn');
+
+        // Verify error explanation was sent
+        const errorNotification = mockSendNotification.mock.calls.find(
+          (call) =>
+            call[0].method === 'session/update' &&
+            call[0].params?.update?.sessionUpdate === 'agent_message_chunk' &&
+            call[0].params?.update?.content?.annotations?._meta?.isError ===
+              true
+        );
+
+        expect(errorNotification).toBeDefined();
+        const content = errorNotification[0].params.update.content;
+        expect(content.text).toContain('not installed');
+        expect(content.text).toContain('install cursor-agent CLI');
+        expect(content.annotations._meta.isError).toBe(true);
+        expect(content.annotations._meta.severity).toBe('error');
+        expect(content.annotations._meta.errorType).toBe(
+          'capability_unavailable'
+        );
+      });
+
+      it('should send authentication error explanation when cursor-agent CLI is not authenticated', async () => {
+        const mockSendNotification = jest.fn();
+        const handlerWithMock = new PromptHandler({
+          sessionManager: mockSessionManager as any,
+          cursorBridge: mockCursorBridge as any,
+          config: mockConfig,
+          logger: mockLogger,
+          sendNotification: mockSendNotification,
+        });
+
+        mockSessionManager.loadSession.mockResolvedValue({
+          id: 'test-session-1',
+          metadata: {
+            cwd: '/tmp/test-project',
+          },
+        });
+        mockSessionManager.getSessionModel.mockReturnValue('default');
+        mockCursorBridge.sendPrompt.mockResolvedValue({
+          success: false,
+          error: 'User not authenticated. Please run: cursor-agent login',
+        });
+
+        const response = await handlerWithMock.processPrompt(validRequest);
+
+        expect(response.result?.stopReason).toBe('end_turn');
+
+        // Verify authentication error explanation was sent
+        const errorNotification = mockSendNotification.mock.calls.find(
+          (call) =>
+            call[0].method === 'session/update' &&
+            call[0].params?.update?.sessionUpdate === 'agent_message_chunk' &&
+            call[0].params?.update?.content?.annotations?._meta?.isError ===
+              true &&
+            call[0].params?.update?.content?.annotations?._meta?.errorType ===
+              'authentication'
+        );
+
+        expect(errorNotification).toBeDefined();
+        const content = errorNotification[0].params.update.content;
+        expect(content.text).toContain('not authenticated');
+        expect(content.text).toContain('cursor-agent login');
+        expect(content.annotations._meta.errorType).toBe('authentication');
+      });
+
+      it('should categorize cursor-agent CLI errors correctly', async () => {
+        const mockSendNotification = jest.fn();
+        const handlerWithMock = new PromptHandler({
+          sessionManager: mockSessionManager as any,
+          cursorBridge: mockCursorBridge as any,
+          config: mockConfig,
+          logger: mockLogger,
+          sendNotification: mockSendNotification,
+        });
+
+        mockSessionManager.loadSession.mockResolvedValue({
+          id: 'test-session-1',
+          metadata: {
+            cwd: '/tmp/test-project',
+          },
+        });
+        mockSessionManager.getSessionModel.mockReturnValue('default');
+
+        // Test "not installed" error
+        mockCursorBridge.sendPrompt.mockResolvedValue({
+          success: false,
+          error: 'cursor-agent CLI not installed or not in PATH',
+        });
+
+        const response1 = await handlerWithMock.processPrompt(validRequest);
+        expect(response1.result?._meta?.stopReasonDetails?.reason).toBe(
+          'capability_unavailable'
+        );
+
+        // Test "not authenticated" error
+        mockCursorBridge.sendPrompt.mockResolvedValue({
+          success: false,
+          error: 'User not authenticated',
+        });
+
+        const response2 = await handlerWithMock.processPrompt(validRequest);
+        expect(response2.result?._meta?.stopReasonDetails?.reason).toBe(
+          'authentication'
+        );
       });
     });
   });

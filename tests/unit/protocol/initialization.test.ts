@@ -198,7 +198,7 @@ describe('InitializationHandler', () => {
       // Mock cursor-agent being unavailable
       jest.spyOn(handler as any, 'testCursorConnectivity').mockResolvedValue({
         success: false,
-        error: 'cursor-agent not found',
+        error: 'cursor-agent CLI not installed or not in PATH',
       });
 
       // Act
@@ -209,6 +209,14 @@ describe('InitializationHandler', () => {
       expect(result.protocolVersion).toBe(1);
       expect(result.agentCapabilities).toBeDefined();
       expect(result.agentCapabilities._meta?.cursorAvailable).toBe(false);
+
+      // Verify cursorCliGuidance is included in metadata
+      expect(result._meta?.cursorCliGuidance).toBeDefined();
+      expect(result._meta?.cursorCliGuidance?.issue).toContain('not installed');
+      expect(result._meta?.cursorCliGuidance?.resolution).toContain(
+        'Install cursor-agent CLI'
+      );
+      expect(result._meta?.cursorCliStatus).toBe('unavailable');
     });
 
     it('should succeed even if cursor-agent authentication fails (non-blocking per ACP spec)', async () => {
@@ -221,7 +229,8 @@ describe('InitializationHandler', () => {
       jest.spyOn(handler as any, 'testCursorConnectivity').mockResolvedValue({
         success: true,
         authenticated: false,
-        error: 'Authentication required',
+        error: 'User not authenticated. Please run: cursor-agent login',
+        version: '1.2.3',
       });
 
       // Act
@@ -231,6 +240,17 @@ describe('InitializationHandler', () => {
       expect(result).toBeDefined();
       expect(result.agentCapabilities).toBeDefined();
       expect(result.agentCapabilities._meta?.cursorAvailable).toBe(false);
+
+      // Verify cursorCliGuidance is included in metadata
+      expect(result._meta?.cursorCliGuidance).toBeDefined();
+      expect(result._meta?.cursorCliGuidance?.issue).toContain(
+        'not authenticated'
+      );
+      expect(result._meta?.cursorCliGuidance?.resolution).toBe(
+        'Run: cursor-agent login'
+      );
+      expect(result._meta?.cursorAuthenticated).toBe(false);
+      expect(result._meta?.cursorVersion).toBe('1.2.3');
     });
 
     it('should succeed when cursor-agent is available and authenticated', async () => {
@@ -1343,6 +1363,177 @@ describe('InitializationHandler', () => {
       expect(result.agentCapabilities._meta).toBeDefined();
       expect(result.agentCapabilities._meta?.implementation).toBe(
         'cursor-agent-acp-npm'
+      );
+    });
+  });
+
+  describe('cursor CLI bridge integration', () => {
+    it('should use cursor bridge getter when set', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      const mockCursorBridge = {
+        getVersion: jest.fn().mockResolvedValue('1.2.3'),
+        checkAuthentication: jest.fn().mockResolvedValue({
+          authenticated: true,
+          user: 'test-user',
+          email: 'test@example.com',
+        }),
+      };
+
+      handler.setCursorBridgeGetter(() => mockCursorBridge);
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert
+      expect(mockCursorBridge.getVersion).toHaveBeenCalled();
+      expect(mockCursorBridge.checkAuthentication).toHaveBeenCalled();
+      expect(result._meta?.cursorCliStatus).toBe('available');
+      expect(result._meta?.cursorAuthenticated).toBe(true);
+      expect(result._meta?.cursorVersion).toBe('1.2.3');
+    });
+
+    it('should handle cursor bridge getter returning undefined', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      handler.setCursorBridgeGetter(() => undefined);
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert
+      expect(result._meta?.cursorCliStatus).toBe('unavailable');
+      expect(result._meta?.cursorAuthenticated).toBeUndefined();
+    });
+
+    it('should handle cursor bridge not being set', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      // Don't set cursor bridge getter
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert
+      expect(result._meta?.cursorCliStatus).toBe('unavailable');
+    });
+
+    it('should detect cursor-agent CLI not installed error', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      const mockCursorBridge = {
+        getVersion: jest
+          .fn()
+          .mockRejectedValue(new Error('spawn cursor-agent ENOENT')),
+        checkAuthentication: jest.fn(),
+      };
+
+      handler.setCursorBridgeGetter(() => mockCursorBridge);
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert
+      expect(result._meta?.cursorCliStatus).toBe('unavailable');
+      expect(result._meta?.cursorCliGuidance?.issue).toContain('not installed');
+      expect(result._meta?.cursorCliGuidance?.resolution).toContain(
+        'Install cursor-agent CLI'
+      );
+    });
+
+    it('should detect cursor-agent CLI authentication error', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      const mockCursorBridge = {
+        getVersion: jest.fn().mockResolvedValue('1.2.3'),
+        checkAuthentication: jest.fn().mockResolvedValue({
+          authenticated: false,
+          error: 'User not authenticated',
+        }),
+      };
+
+      handler.setCursorBridgeGetter(() => mockCursorBridge);
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert
+      expect(result._meta?.cursorCliStatus).toBe('available');
+      expect(result._meta?.cursorAuthenticated).toBe(false);
+      expect(result._meta?.cursorVersion).toBe('1.2.3');
+      expect(result._meta?.cursorCliGuidance?.issue).toContain(
+        'not authenticated'
+      );
+      expect(result._meta?.cursorCliGuidance?.resolution).toBe(
+        'Run: cursor-agent login'
+      );
+    });
+
+    it('should handle cursor bridge getVersion throwing non-ENOENT error', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      const mockCursorBridge = {
+        getVersion: jest.fn().mockRejectedValue(new Error('Timeout error')),
+        checkAuthentication: jest.fn(),
+      };
+
+      handler.setCursorBridgeGetter(() => mockCursorBridge);
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert
+      expect(result._meta?.cursorCliStatus).toBe('unavailable');
+      expect(result._meta?.cursorCliGuidance?.issue).toContain(
+        'Failed to execute'
+      );
+    });
+
+    it('should handle cursor bridge checkAuthentication throwing error', async () => {
+      // Arrange
+      const params: InitializeParams = {
+        protocolVersion: 1,
+      };
+
+      const mockCursorBridge = {
+        getVersion: jest.fn().mockResolvedValue('1.2.3'),
+        checkAuthentication: jest
+          .fn()
+          .mockRejectedValue(new Error('Auth check failed')),
+      };
+
+      handler.setCursorBridgeGetter(() => mockCursorBridge);
+
+      // Act
+      const result = await handler.initialize(params);
+
+      // Assert
+      expect(result._meta?.cursorCliStatus).toBe('available');
+      expect(result._meta?.cursorAuthenticated).toBe(false);
+      expect(result._meta?.cursorVersion).toBe('1.2.3');
+      // When auth check throws, we still provide guidance
+      expect(result._meta?.cursorCliGuidance).toBeDefined();
+      expect(result._meta?.cursorCliGuidance?.issue).toBeDefined();
+      expect(result._meta?.cursorCliGuidance?.resolution).toBe(
+        'Run: cursor-agent login'
       );
     });
   });

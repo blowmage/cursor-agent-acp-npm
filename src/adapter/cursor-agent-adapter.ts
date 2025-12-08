@@ -568,6 +568,12 @@ export class CursorAgentAdapter implements ClientConnection {
       return this.extensionRegistry;
     });
 
+    // Set Cursor CLI bridge getter for connectivity testing during initialization
+    // This allows InitializationHandler to check if cursor-agent CLI is available
+    this.initializationHandler.setCursorBridgeGetter(() => {
+      return this.cursorBridge || undefined;
+    });
+
     this.promptHandler = new PromptHandler({
       sessionManager: this.sessionManager,
       cursorBridge: this.cursorBridge,
@@ -680,12 +686,23 @@ export class CursorAgentAdapter implements ClientConnection {
     });
   }
 
+  /**
+   * Verify Cursor CLI integration (non-blocking)
+   *
+   * Per ACP spec: Initialization should succeed to communicate capabilities.
+   * Errors should occur when features are actually used, not during initialization.
+   *
+   * This method logs warnings but does not throw errors, allowing the agent
+   * to start and communicate its capabilities to the client. The actual
+   * cursor-agent availability check happens during ACP initialization and
+   * is reflected in the agentCapabilities response.
+   */
   private async verifyCursorIntegration(): Promise<void> {
     if (!this.cursorBridge) {
-      throw new AdapterError(
-        'CursorCliBridge not initialized',
-        'COMPONENT_ERROR'
+      this.logger.warn(
+        'CursorCliBridge not initialized - cursor-agent features will be unavailable'
       );
+      return;
     }
 
     try {
@@ -696,7 +713,11 @@ export class CursorAgentAdapter implements ClientConnection {
       // Check authentication status
       const authStatus = await this.cursorBridge.checkAuthentication();
       if (!authStatus.authenticated) {
-        this.logger.warn('Cursor CLI not authenticated', authStatus);
+        this.logger.warn(
+          'Cursor CLI not authenticated - cursor-agent features requiring authentication will be unavailable',
+          authStatus
+        );
+        this.logger.warn('To authenticate, run: `cursor-agent login`');
       } else {
         this.logger.info('Cursor CLI authenticated', {
           user: authStatus.user,
@@ -704,12 +725,34 @@ export class CursorAgentAdapter implements ClientConnection {
         });
       }
     } catch (error) {
-      this.logger.error('Cursor CLI verification failed', error);
-      throw new AdapterError(
-        `Cursor CLI not available: ${error instanceof Error ? error.message : String(error)}`,
-        'CURSOR_ERROR',
-        error instanceof Error ? error : undefined
-      );
+      // Per ACP spec: Don't fail initialization if cursor-agent is unavailable
+      // The agent should still start and communicate limited capabilities
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+
+      // Check if this is a "command not found" error
+      const isNotFoundError =
+        errorMessage.includes('ENOENT') ||
+        errorMessage.includes('not found') ||
+        errorMessage.includes('command not found') ||
+        errorMessage.includes('spawn cursor-agent ENOENT');
+
+      if (isNotFoundError) {
+        this.logger.warn(
+          'cursor-agent CLI not found in PATH - cursor-agent features will be unavailable'
+        );
+        this.logger.warn(
+          'To install cursor-agent CLI, visit: https://cursor.sh/docs/agent'
+        );
+      } else {
+        this.logger.warn(
+          'Cursor CLI verification failed - cursor-agent features may be unavailable',
+          { error: errorMessage }
+        );
+      }
+
+      // Don't throw - let the agent start and communicate capabilities
+      // The initialization handler will properly advertise limited capabilities
     }
   }
 

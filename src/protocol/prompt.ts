@@ -271,7 +271,54 @@ export class PromptHandler {
       let reason: string;
       if (error) {
         // Categorize errors by type
+        // Check for cursor-agent CLI specific errors first
         if (
+          error.name === 'CursorError' ||
+          error.message.includes('cursor-agent') ||
+          error.message.includes('Cursor CLI')
+        ) {
+          // Detect specific cursor-agent CLI issues
+          // First check if it's a "not installed" error
+          const isNotInstalledError =
+            error.message.includes('not installed') ||
+            error.message.includes('not found') ||
+            error.message.includes('ENOENT') ||
+            error.message.includes('command not found') ||
+            error.message.includes('spawn cursor-agent ENOENT');
+
+          if (isNotInstalledError) {
+            reason = 'capability_unavailable'; // cursor-agent CLI not installed
+          } else if (
+            // Check for explicit authentication errors
+            error.message.includes('not authenticated') ||
+            error.message.includes('authentication') ||
+            error.message.includes('auth') ||
+            error.message.includes('User not authenticated') ||
+            error.message.includes('Authentication check failed') ||
+            error.message.includes('Please run: cursor-agent login') ||
+            error.message.includes('login') ||
+            error.message.includes('sign in') ||
+            error.message.includes('unauthorized') ||
+            error.message.includes('Unauthorized')
+          ) {
+            reason = 'authentication'; // cursor-agent CLI not authenticated
+          } else {
+            // For other cursor-agent CLI errors where CLI is installed but fails,
+            // if it's a CursorError or ProtocolError with "Cursor CLI error",
+            // and we can't determine the specific cause, assume it's likely authentication
+            // (since installation errors would have been caught above)
+            if (
+              error.name === 'CursorError' ||
+              (error.message.includes('Cursor CLI error') &&
+                !error.message.includes('timeout') &&
+                !error.message.includes('rate limit'))
+            ) {
+              reason = 'authentication'; // Likely authentication issue
+            } else {
+              reason = 'capability_unavailable'; // Other cursor-agent CLI errors
+            }
+          }
+        } else if (
           error.name === 'AuthenticationError' ||
           error.message.includes('authentication')
         ) {
@@ -367,6 +414,106 @@ export class PromptHandler {
         },
       });
     }
+  }
+
+  /**
+   * Send explanatory message when refusing due to errors
+   * Per ACP spec: Agents SHOULD send explanatory messages via session/update
+   * when refusing to process a prompt, helping clients understand the issue
+   *
+   * @param sessionId - The session ID
+   * @param error - The error that caused the refusal
+   * @param stopData - The stop reason data with details
+   */
+  private sendRefusalExplanation(
+    sessionId: string,
+    error: Error,
+    stopData: {
+      stopReason: PromptResponse['stopReason'];
+      stopReasonDetails?: Record<string, any>;
+    }
+  ): void {
+    const reason = stopData.stopReasonDetails?.['reason'] || 'error';
+    let explanationText: string;
+
+    // Provide specific explanations based on error type
+    if (reason === 'capability_unavailable') {
+      // cursor-agent CLI not installed or unavailable
+      if (
+        error.message.includes('not installed') ||
+        error.message.includes('not found') ||
+        error.message.includes('ENOENT') ||
+        error.message.includes('command not found') ||
+        error.message.includes('spawn cursor-agent ENOENT')
+      ) {
+        explanationText =
+          'Unable to process your request because the cursor-agent CLI is not installed or not available in PATH.\n\nTo fix this, install cursor-agent CLI: https://cursor.sh/docs/agent';
+      } else {
+        // If cursor-agent CLI is installed but unavailable, it might be an authentication issue
+        // Check error message for authentication hints
+        if (
+          error.message.includes('Cursor CLI error') &&
+          !error.message.includes('not installed') &&
+          !error.message.includes('not found')
+        ) {
+          // cursor-agent CLI is installed but failing - likely authentication
+          explanationText =
+            'Unable to process your request because cursor-agent CLI is not authenticated.\n\nTo authenticate, run: `cursor-agent login`';
+        } else {
+          explanationText =
+            'Unable to process your request because cursor-agent CLI is unavailable.\n\nPlease check that cursor-agent CLI is properly installed and accessible.';
+        }
+      }
+    } else if (reason === 'authentication') {
+      // cursor-agent CLI not authenticated
+      explanationText =
+        'Unable to process your request because cursor-agent CLI is not authenticated.\n\nTo authenticate, run: `cursor-agent login`';
+    } else {
+      // Generic error
+      explanationText = `Unable to process your request: ${error.message}`;
+    }
+
+    // Build explanatory message content
+    // Per ACP spec: Use annotations._meta to indicate error messages
+    // Clients can check _meta.isError or _meta.category === 'error' to identify errors
+    const explanationContent: ContentBlock = {
+      type: 'text',
+      text: explanationText,
+      annotations: {
+        _meta: {
+          isError: true, // Explicit flag indicating this is an error message
+          category: 'error', // Error category for client display
+          audience: ['user'],
+          priority: 5, // High priority for errors
+          errorType: reason, // Specific error type (capability_unavailable, authentication, etc.)
+          severity: 'error', // Error severity level
+        },
+      },
+    };
+
+    // Convert to ACP format and send
+    const acpContent = this.convertContentBlockToAcp(explanationContent);
+    const annotatedContent = this.annotateContentBlock(
+      acpContent,
+      this.getDefaultAnnotations('text', false)
+    );
+
+    this.sendNotification({
+      jsonrpc: '2.0',
+      method: 'session/update',
+      params: {
+        sessionId,
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: annotatedContent,
+        },
+      },
+    });
+
+    this.logger.debug('Sent refusal explanation to client', {
+      sessionId,
+      reason,
+    });
   }
 
   /**
@@ -838,13 +985,24 @@ export class PromptHandler {
             responseMetadata
           );
 
+          // Per ACP spec: Send explanatory message when refusing due to errors
+          // This helps clients understand why the agent refused and what to do
+          // When we send an explanation, we change stopReason to 'end_turn' to keep
+          // the session open so the diagnostic information is visible to the user
+          let finalStopReason = stopData.stopReason;
+          if (processingError && stopData.stopReason === STOP_REASON.REFUSAL) {
+            this.sendRefusalExplanation(sessionId, processingError, stopData);
+            // Change to 'end_turn' to keep session open - error details remain in metadata
+            finalStopReason = STOP_REASON.END_TURN;
+          }
+
           // Calculate processing metrics
           const endTime = Date.now();
           const processingDurationMs = endTime - startTime;
 
           // Build proper PromptResponse with rich metadata
           const response: PromptResponse = {
-            stopReason: stopData.stopReason,
+            stopReason: finalStopReason,
             _meta: {
               // Timing information
               processingStartedAt: new Date(startTime).toISOString(),
@@ -877,9 +1035,13 @@ export class PromptHandler {
           if (processingError) {
             this.logger.warn('Prompt processing completed with error', {
               sessionId,
-              stopReason: stopData.stopReason,
+              originalStopReason: stopData.stopReason,
+              finalStopReason: finalStopReason,
               error: processingError.message,
               details: stopData.stopReasonDetails,
+              explanationSent:
+                finalStopReason === STOP_REASON.END_TURN &&
+                stopData.stopReason === STOP_REASON.REFUSAL,
             });
           }
 

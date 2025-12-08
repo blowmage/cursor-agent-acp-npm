@@ -926,7 +926,7 @@ describe('Prompt Turn Integration Tests', () => {
       expect(response.result?.stopReason).toBe('end_turn');
     }, 10000);
 
-    it('should return stopReason: refusal for errors', async () => {
+    it('should return stopReason: end_turn for errors with explanation', async () => {
       // Configure mock to return an error
       const mockBridge = (adapter as any).cursorBridge;
       const originalSendPrompt = mockBridge.sendPrompt;
@@ -946,7 +946,13 @@ describe('Prompt Turn Integration Tests', () => {
         },
       });
 
-      expect(response.result?.stopReason).toBe('refusal');
+      // Per ACP spec: When sending explanation messages, we return 'end_turn' to keep session open
+      // This allows the diagnostic information to be visible to the user
+      expect(response.result?.stopReason).toBe('end_turn');
+
+      // Verify error details are in metadata
+      expect(response.result?._meta?.stopReasonDetails).toBeDefined();
+      expect(response.result?._meta?.stopReasonDetails?.reason).toBeDefined();
 
       // Restore original
       mockBridge.sendPrompt = originalSendPrompt;
@@ -1145,7 +1151,7 @@ describe('Prompt Turn Integration Tests', () => {
       notifications = [];
     });
 
-    it('should handle cursor bridge errors gracefully with refusal stopReason', async () => {
+    it('should handle cursor bridge errors gracefully with end_turn stopReason and explanation', async () => {
       // Configure mock to return error
       const mockBridge = (adapter as any).cursorBridge;
       const originalSendPrompt = mockBridge.sendPrompt;
@@ -1165,17 +1171,27 @@ describe('Prompt Turn Integration Tests', () => {
         },
       });
 
-      // Per ACP spec: Cursor errors result in stopReason='refusal', not failure
-      expect(response.result?.stopReason).toBe('refusal');
+      // Per ACP spec: When sending explanation messages, we return 'end_turn' to keep session open
+      // This allows the diagnostic information to be visible to the user
+      expect(response.result?.stopReason).toBe('end_turn');
 
       // Should have _meta with error details and specific subtype
       expect(response.result?._meta?.stopReasonDetails).toBeDefined();
-      expect(response.result?._meta?.stopReasonDetails?.reason).toBe('error'); // Specific subtype, not generic 'refusal'
+      expect(response.result?._meta?.stopReasonDetails?.reason).toBeDefined();
 
       // Should have processing time in metadata
       expect(
         response.result?._meta?.processingDurationMs
       ).toBeGreaterThanOrEqual(0);
+
+      // Verify that an error explanation notification was sent
+      const errorNotifications = notifications.filter(
+        (n) =>
+          n.method === 'session/update' &&
+          n.params?.update?.sessionUpdate === 'agent_message_chunk' &&
+          n.params?.update?.content?.annotations?._meta?.isError === true
+      );
+      expect(errorNotifications.length).toBeGreaterThan(0);
 
       // Restore
       mockBridge.sendPrompt = originalSendPrompt;
