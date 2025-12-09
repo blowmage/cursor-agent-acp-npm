@@ -112,8 +112,8 @@ export class CursorCliBridge {
         const authenticated = Boolean(
           user ||
           email ||
-          cleanOutput.includes('Signed in') ||
-          cleanOutput.includes('Logged in')
+          cleanOutput.toLowerCase().includes('signed in') ||
+          cleanOutput.toLowerCase().includes('logged in')
         );
 
         const result: CursorAuthStatus = {
