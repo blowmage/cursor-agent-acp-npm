@@ -60,6 +60,20 @@ authCommand
     await handleAuthLogin(options);
   });
 
+authCommand
+  .command('logout')
+  .description('Logout from Cursor CLI')
+  .action(async () => {
+    await handleAuthLogout();
+  });
+
+authCommand
+  .command('status')
+  .description('Check authentication status')
+  .action(async () => {
+    await handleAuthStatus();
+  });
+
 // Main program options
 program
   .option('-c, --config <path>', 'path to configuration file')
@@ -181,6 +195,82 @@ async function handleAuthLogin(options: { check?: boolean }): Promise<void> {
       process.exit(1);
     });
   });
+}
+
+/**
+ * Handle auth logout command
+ */
+async function handleAuthLogout(): Promise<void> {
+  const logger = createLogger({ level: 'info' });
+
+  logger.info('Logging out from Cursor CLI...');
+
+  return new Promise<void>((resolve, reject) => {
+    const childProcess = spawn('cursor-agent', ['logout'], {
+      stdio: 'inherit', // Inherit stdin/stdout/stderr for interactive logout
+      env: { ...process.env },
+    });
+
+    childProcess.on('close', (code: number | null) => {
+      if (code === 0) {
+        logger.info('✅ Logout completed successfully!');
+        resolve();
+        process.exit(0);
+      } else {
+        logger.error(`Logout failed with exit code ${code}`);
+        reject(new Error(`Logout failed with exit code ${code}`));
+        process.exit(code || 1);
+      }
+    });
+
+    childProcess.on('error', (error: Error) => {
+      logger.error(`Failed to start logout process: ${error.message}`);
+      reject(error);
+      process.exit(1);
+    });
+  });
+}
+
+/**
+ * Handle auth status command
+ */
+async function handleAuthStatus(): Promise<void> {
+  const logger = createLogger({ level: 'info' });
+
+  logger.info('Checking authentication status...');
+
+  try {
+    const config: AdapterConfig = { ...DEFAULT_CONFIG };
+    const bridge = new CursorCliBridge(config, logger);
+    const authStatus = await bridge.checkAuthentication();
+
+    if (authStatus.authenticated) {
+      logger.info('✅ Authenticated');
+      if (authStatus.user) {
+        logger.info(`   User: ${authStatus.user}`);
+      }
+      if (authStatus.email) {
+        logger.info(`   Email: ${authStatus.email}`);
+      }
+      if (authStatus.plan) {
+        logger.info(`   Plan: ${authStatus.plan}`);
+      }
+      await bridge.close();
+      process.exit(0);
+    } else {
+      logger.warn('❌ Not authenticated');
+      if (authStatus.error) {
+        logger.warn(`   Error: ${authStatus.error}`);
+      }
+      await bridge.close();
+      process.exit(1);
+    }
+  } catch (error) {
+    logger.error(
+      `Failed to check authentication status: ${error instanceof Error ? error.message : String(error)}`
+    );
+    process.exit(1);
+  }
 }
 
 async function main(): Promise<void> {

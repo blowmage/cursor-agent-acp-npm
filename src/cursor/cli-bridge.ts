@@ -71,14 +71,35 @@ export class CursorCliBridge {
       try {
         const statusOutput = response.stdout || '';
 
+        // Remove ANSI escape codes for easier parsing
+        const cleanOutput = statusOutput.replace(
+          // eslint-disable-next-line no-control-regex
+          /\x1B\[[0-9;]*[A-Za-z]|\x1B\].*?\x07/g,
+          ''
+        );
+
         // Look for authentication indicators in the output
-        const lines = statusOutput.split('\n');
+        const lines = cleanOutput.split('\n');
         let user: string | undefined;
         let email: string | undefined;
         let plan: string | undefined;
 
         for (const line of lines) {
-          if (line.includes('User:') || line.includes('user:')) {
+          // Handle "Logged in as user@example.com" format
+          const loggedInMatch = line.match(
+            /(?:Logged in|Signed in)\s+as\s+(.+)/i
+          );
+          if (loggedInMatch?.[1]) {
+            const userInfo = loggedInMatch[1].trim();
+            // Check if it looks like an email
+            if (userInfo.includes('@')) {
+              email = userInfo;
+            } else {
+              user = userInfo;
+            }
+          }
+          // Handle traditional "User:" format
+          else if (line.includes('User:') || line.includes('user:')) {
             user = line.split(':')[1]?.trim();
           } else if (line.includes('Email:') || line.includes('email:')) {
             email = line.split(':')[1]?.trim();
@@ -89,7 +110,10 @@ export class CursorCliBridge {
 
         // If we got user info, we're authenticated
         const authenticated = Boolean(
-          user || email || statusOutput.includes('Signed in')
+          user ||
+          email ||
+          cleanOutput.toLowerCase().includes('signed in') ||
+          cleanOutput.toLowerCase().includes('logged in')
         );
 
         const result: CursorAuthStatus = {
