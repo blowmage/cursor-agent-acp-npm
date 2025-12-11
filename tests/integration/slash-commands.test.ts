@@ -95,6 +95,7 @@ describe('Slash Commands Integration', () => {
         method: 'session/new' as const,
         params: {
           cwd: process.cwd(),
+          mcpServers: [],
         },
       };
 
@@ -105,6 +106,9 @@ describe('Slash Commands Integration', () => {
       expect(response.result).toBeDefined();
       const sessionResponse = response.result as NewSessionResponse;
       expect(sessionResponse.sessionId).toBeDefined();
+
+      // Wait for async notification to be sent
+      await new Promise((resolve) => setImmediate(resolve));
 
       // Find available_commands_update notification
       const commandsNotification = capturedNotifications.find(
@@ -132,10 +136,14 @@ describe('Slash Commands Integration', () => {
         method: 'session/new' as const,
         params: {
           cwd: process.cwd(),
+          mcpServers: [],
         },
       };
 
       await adapter.processRequest(request);
+
+      // Wait for async notification to be sent
+      await new Promise((resolve) => setImmediate(resolve));
 
       const commandsNotification = capturedNotifications.find(
         (n) =>
@@ -164,12 +172,16 @@ describe('Slash Commands Integration', () => {
         method: 'session/new' as const,
         params: {
           cwd: process.cwd(),
+          mcpServers: [],
         },
       };
 
       const createResponse = await adapter.processRequest(createRequest);
       expect(createResponse.result).toBeDefined();
       const sessionId = (createResponse.result as NewSessionResponse).sessionId;
+
+      // Wait for session/new notification
+      await new Promise((resolve) => setImmediate(resolve));
 
       // Clear captured notifications after session creation
       capturedNotifications.length = 0;
@@ -190,6 +202,9 @@ describe('Slash Commands Integration', () => {
 
       expect(loadResponse.error).toBeUndefined();
       expect(loadResponse.result).toBeDefined();
+
+      // Wait for async notification to be sent
+      await new Promise((resolve) => setImmediate(resolve));
 
       // Per ACP spec: Agent MAY send available_commands_update after loading a session
       // Note: This is optional per the spec, so if no commands are registered, no notification will be sent
@@ -429,10 +444,14 @@ describe('Slash Commands Integration', () => {
         method: 'session/new' as const,
         params: {
           cwd: process.cwd(),
+          mcpServers: [],
         },
       };
 
       await adapter.processRequest(request);
+
+      // Wait for async notification to be sent
+      await new Promise((resolve) => setImmediate(resolve));
 
       const commandsNotification = capturedNotifications.find(
         (n) =>
@@ -461,10 +480,14 @@ describe('Slash Commands Integration', () => {
         method: 'session/new' as const,
         params: {
           cwd: process.cwd(),
+          mcpServers: [],
         },
       };
 
       await adapter.processRequest(request);
+
+      // Wait for async notification to be sent
+      await new Promise((resolve) => setImmediate(resolve));
 
       const commandsNotification = capturedNotifications.find(
         (n) =>
@@ -587,10 +610,14 @@ describe('Slash Commands Integration', () => {
         method: 'session/new' as const,
         params: {
           cwd: process.cwd(),
+          mcpServers: [],
         },
       };
 
       await adapter.processRequest(request);
+
+      // Wait for async notification to be sent
+      await new Promise((resolve) => setImmediate(resolve));
 
       const commandsNotification = capturedNotifications.find(
         (n) =>
@@ -616,10 +643,14 @@ describe('Slash Commands Integration', () => {
         method: 'session/new' as const,
         params: {
           cwd: process.cwd(),
+          mcpServers: [],
         },
       };
 
       await adapter.processRequest(request);
+
+      // Wait for async notification to be sent
+      await new Promise((resolve) => setImmediate(resolve));
 
       const commandsNotification = capturedNotifications.find(
         (n) =>

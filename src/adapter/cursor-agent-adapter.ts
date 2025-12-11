@@ -922,7 +922,12 @@ export class CursorAgentAdapter implements ClientConnection {
     };
 
     // Per ACP spec: Agent MAY send available_commands_update notification after creating a session
-    this.sendAvailableCommandsUpdate(sessionData.id);
+    // IMPORTANT: Send notification AFTER returning response to avoid confusing clients
+    // that expect the response with matching id before any notifications.
+    // This is done via setImmediate to ensure the response is sent first.
+    setImmediate(() => {
+      this.sendAvailableCommandsUpdate(sessionData.id);
+    });
 
     return {
       jsonrpc: '2.0' as const,
@@ -1046,7 +1051,12 @@ export class CursorAgentAdapter implements ClientConnection {
     };
 
     // Per ACP spec: Agent MAY send available_commands_update notification after loading a session
-    this.sendAvailableCommandsUpdate(sessionId);
+    // IMPORTANT: Send notification AFTER returning response to avoid confusing clients
+    // that expect the response with matching id before any notifications.
+    // This is done via setImmediate to ensure the response is sent first.
+    setImmediate(() => {
+      this.sendAvailableCommandsUpdate(sessionId);
+    });
 
     return {
       jsonrpc: '2.0' as const,
