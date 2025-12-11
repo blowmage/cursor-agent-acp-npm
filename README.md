@@ -254,14 +254,14 @@ npm run build:watch
 │             Cursor Agent ACP Adapter                │
 │  ┌─────────────────────────────────────────────────┐│
 │  │           Protocol Layer                        ││
-│  │  • Initialization  • Session Management        ││
-│  │  • Prompt Handling • Content Processing        ││
-│  │  • Tool Calling    • Error Handling            ││
+│  │  • Initialization  • Session Management         ││
+│  │  • Prompt Handling • Content Processing         ││
+│  │  • Tool Calling    • Error Handling             ││
 │  └─────────────────────────────────────────────────┘│
 │  ┌─────────────────────────────────────────────────┐│
 │  │           Integration Layer                     ││
-│  │  • CLI Bridge     • Authentication             ││
-│  │  • Session Sync   • Response Translation       ││
+│  │  • CLI Bridge     • Authentication              ││
+│  │  • Session Sync   • Response Translation        ││
 │  └─────────────────────────────────────────────────┘│
 └─────────────────┬───────────────────────────────────┘
                   │ Command execution
