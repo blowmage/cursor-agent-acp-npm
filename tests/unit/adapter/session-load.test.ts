@@ -327,6 +327,9 @@ describe('CursorAgentAdapter - session/load', () => {
 
       const sessionId = createResponse.result.sessionId;
 
+      // Wait for session/new notification to be sent
+      await new Promise((resolve) => setImmediate(resolve));
+
       // Clear notifications from creation
       sentNotifications = [];
 
@@ -345,8 +348,8 @@ describe('CursorAgentAdapter - session/load', () => {
 
       expect(response.result).toBeDefined();
 
-      // Wait a bit for notification to be sent
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      // Wait for notification to be sent (uses setImmediate)
+      await new Promise((resolve) => setImmediate(resolve));
 
       // Should have sent available_commands_update notification
       const commandNotifications = sentNotifications.filter(

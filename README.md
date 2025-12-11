@@ -119,6 +119,29 @@ If installed locally:
 }
 ```
 
+### JetBrains IDE Integration
+
+The adapter supports JetBrains IDEs (WebStorm, IntelliJ IDEA, PyCharm, etc.) version 25.3 and later.
+
+Create or edit `~/.jetbrains/acp.json`:
+
+```json
+{
+  "agent_servers": {
+    "Cursor Agent": {
+      "command": "cursor-agent-acp",
+      "args": [],
+      "env": {}
+    }
+  }
+}
+```
+
+Or configure through the IDE:
+1. Open **AI Chat** tool window
+2. Click ⚙️ settings → **"Configure ACP Agents"**
+3. Add the configuration above
+
 ### Using with Other Editors
 
 The adapter works with any ACP-compliant editor using the standard stdio transport. Configure your editor to launch `cursor-agent-acp` as an agent server process.

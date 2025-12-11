@@ -848,8 +848,8 @@ describe('session/new - Parameter Validation', () => {
       expect(response.result).toBeDefined();
       expect(response.result.sessionId).toBeDefined();
 
-      // Wait a bit for notification to be sent
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      // Wait for notification to be sent (uses setImmediate)
+      await new Promise((resolve) => setImmediate(resolve));
 
       // Should have sent available_commands_update notification
       const commandNotifications = sentNotifications.filter(
