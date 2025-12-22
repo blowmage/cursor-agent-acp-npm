@@ -11,9 +11,10 @@ import type {
   PromptResponse,
   PlanEntry,
   SessionNotification,
+  RequestId,
+  Error as JsonRpcError,
 } from '@agentclientprotocol/sdk';
 import type { AnyRequest } from '@agentclientprotocol/sdk/dist/jsonrpc.js';
-import type { Error as JsonRpcError } from '@agentclientprotocol/sdk';
 import type { SlashCommandsRegistry } from '../tools/slash-commands';
 import {
   ProtocolError,
@@ -24,6 +25,7 @@ import {
   type Logger,
   type AdapterConfig,
 } from '../types';
+import { toRequestId, createSuccessResponse } from '../utils/json-rpc';
 import type { SessionManager } from '../session/manager';
 import type { CursorCliBridge } from '../cursor/cli-bridge';
 import { ContentProcessor } from './content';
@@ -61,7 +63,6 @@ export interface StreamOptions {
 export interface PromptProcessingConfig {
   echoUserMessages?: boolean; // Echo user messages via user_message_chunk
   sendPlan?: boolean; // Send plan notifications (if multi-step processing)
-  reportToolCalls?: boolean; // Report tool call lifecycle via tool_call notifications
   collectDetailedMetrics?: boolean; // Collect comprehensive metrics
   annotateContent?: boolean; // Add annotations to content blocks
   markInternalContent?: boolean; // Mark assistant-only content
@@ -74,29 +75,6 @@ export interface ContentAnnotationOptions {
   confidence?: number; // 0-1, confidence score
   source?: string; // Content source identifier
   category?: string; // Content category (e.g., 'code', 'explanation', 'error')
-}
-
-/**
- * Tool call lifecycle support
- * Internal convenience interface for reporting tool calls
- *
- * Note: This is an internal helper type. For protocol-level types, see:
- * - Per ACP schema: https://agentclientprotocol.com/protocol/schema#toolcall
- * - SDK types: ToolCall, ToolCallUpdate, ToolCallStatus, ToolKind
- *
- * This interface maps to the tool_call SessionUpdate variant, providing
- * a simpler API for internal use while ensuring SDK type compliance.
- */
-export interface ToolCallInfo {
-  id: string;
-  /** Maps to ToolKind from SDK: 'filesystem' | 'terminal' | 'other' */
-  kind: 'filesystem' | 'terminal' | 'other';
-  title: string;
-  /** Maps to ToolCallStatus from SDK */
-  status: 'pending' | 'in_progress' | 'completed' | 'failed';
-  rawInput?: Record<string, any>;
-  rawOutput?: Record<string, any>;
-  content?: ContentBlock[];
 }
 
 // Comprehensive metrics for prompt processing
@@ -160,7 +138,6 @@ export class PromptHandler {
   private readonly processingConfig: PromptProcessingConfig = {
     echoUserMessages: true,
     sendPlan: false, // Disabled by default (requires multi-step planning)
-    reportToolCalls: true, // Enabled by default for ACP compliance
     collectDetailedMetrics: true,
     annotateContent: true, // Enabled by default
     markInternalContent: false, // Disabled (most content is user-facing)
@@ -537,7 +514,11 @@ export class PromptHandler {
     inputContent: ContentBlock[],
     outputContent: ContentBlock[],
     heartbeatCount: number,
-    toolCalls?: ToolCallInfo[]
+    toolCalls?: Array<{
+      title: string;
+      status: 'pending' | 'in_progress' | 'completed' | 'failed';
+      rawOutput?: Record<string, any>;
+    }>
   ): PromptMetrics {
     const contentTypes: Record<string, number> = {};
 
@@ -677,88 +658,6 @@ export class PromptHandler {
   }
 
   /**
-   * Report tool call initiation
-   * Per ACP spec: https://agentclientprotocol.com/protocol/tool-calls
-   * Per ACP schema: https://agentclientprotocol.com/protocol/schema#sessionupdate
-   * Inform client when agent begins using a tool
-   * Note: Public infrastructure method ready for integration with ToolCallManager
-   */
-  public reportToolCall(sessionId: string, toolCall: ToolCallInfo): void {
-    if (!this.processingConfig.reportToolCalls) {
-      return;
-    }
-
-    this.logger.debug('Reporting tool call', {
-      sessionId,
-      toolCallId: toolCall.id,
-      kind: toolCall.kind,
-    });
-
-    // Build properly typed SessionUpdate per ACP schema
-    // SessionUpdate variant: tool_call
-    const update = {
-      sessionUpdate: 'tool_call' as const,
-      toolCallId: toolCall.id,
-      kind: toolCall.kind,
-      title: toolCall.title,
-      status: toolCall.status,
-      ...(toolCall.rawInput && { rawInput: toolCall.rawInput }),
-      ...(toolCall.content && { content: toolCall.content }),
-    };
-
-    this.sendNotification({
-      jsonrpc: '2.0',
-      method: 'session/update',
-      params: {
-        sessionId,
-        update,
-      },
-    });
-  }
-
-  /**
-   * Update tool call status and results
-   * Per ACP spec: https://agentclientprotocol.com/protocol/tool-calls
-   * Per ACP schema: https://agentclientprotocol.com/protocol/schema#sessionupdate
-   * Inform client when tool completes or fails
-   * Note: Public infrastructure method ready for integration with ToolCallManager
-   */
-  public updateToolCall(
-    sessionId: string,
-    toolCallId: string,
-    update: Partial<ToolCallInfo>
-  ): void {
-    if (!this.processingConfig.reportToolCalls) {
-      return;
-    }
-
-    this.logger.debug('Updating tool call', {
-      sessionId,
-      toolCallId,
-      status: update.status,
-    });
-
-    // Build properly typed SessionUpdate per ACP schema
-    // SessionUpdate variant: tool_call_update
-    const sessionUpdate = {
-      sessionUpdate: 'tool_call_update' as const,
-      toolCallId,
-      ...(update.status && { status: update.status }),
-      ...(update.rawOutput && { rawOutput: update.rawOutput }),
-      ...(update.content && { content: update.content }),
-    };
-
-    this.sendNotification({
-      jsonrpc: '2.0',
-      method: 'session/update',
-      params: {
-        sessionId,
-        update: sessionUpdate,
-      },
-    });
-  }
-
-  /**
    * Internal method to send plan notification to client
    * Per ACP spec: https://agentclientprotocol.com/protocol/agent-plan
    * Per ACP schema: https://agentclientprotocol.com/protocol/schema#sessionupdate
@@ -851,7 +750,7 @@ export class PromptHandler {
    */
   async processPrompt(request: AnyRequest): Promise<{
     jsonrpc: '2.0';
-    id: string | number | null;
+    id: RequestId;
     result?: any | null;
     error?: JsonRpcError;
   }> {
@@ -874,7 +773,7 @@ export class PromptHandler {
 
       const processRequest = async (): Promise<{
         jsonrpc: '2.0';
-        id: string | number | null;
+        id: RequestId;
         result?: any | null;
         error?: JsonRpcError;
       }> => {
@@ -1044,11 +943,7 @@ export class PromptHandler {
             });
           }
 
-          return {
-            jsonrpc: '2.0' as const,
-            id: id!,
-            result: response,
-          };
+          return createSuccessResponse(toRequestId(id), response);
         } catch (error) {
           // This catch block is for unexpected errors during the try block above
           // (not from processPromptAsync, which we already caught)
@@ -1111,7 +1006,7 @@ export class PromptHandler {
       return <
         {
           jsonrpc: '2.0';
-          id: string | number | null;
+          id: RequestId;
           result?: any | null;
           error?: JsonRpcError;
         }

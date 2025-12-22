@@ -7,12 +7,30 @@
 
 import type {
   ContentBlock,
+  ModelId,
   Role,
+  RequestId,
   RequestPermissionRequest,
+  SessionId,
   SessionMode,
   SessionModeId,
   SessionModeState,
 } from '@agentclientprotocol/sdk';
+
+// ============================================================================
+// JSON-RPC Types
+// ============================================================================
+
+/**
+ * Generic JSON-RPC 2.0 request type
+ * Used for request routing before dispatching to specific handlers
+ */
+export interface JsonRpcRequest {
+  jsonrpc: '2.0';
+  id?: RequestId;
+  method: string;
+  params?: unknown;
+}
 
 // ============================================================================
 // Internal Implementation Types
@@ -27,8 +45,8 @@ export interface SessionMetadata {
   userId?: string;
   cwd?: string; // Working directory for session
   mcpServers?: any[]; // MCP server configurations
-  mode?: string; // Current session mode ID
-  model?: string; // Current session model ID
+  mode?: SessionModeId; // Current session mode ID
+  model?: ModelId; // Current session model ID
   [key: string]: any;
 }
 
@@ -126,7 +144,7 @@ export interface SessionListResult {
 }
 
 export interface SessionSummary {
-  id: string;
+  id: SessionId;
   metadata: Partial<SessionMetadata>;
   messageCount: number;
   createdAt: Date;
@@ -135,12 +153,12 @@ export interface SessionSummary {
 }
 
 export interface SessionUpdateParams {
-  sessionId: string;
+  sessionId: SessionId;
   metadata?: Partial<SessionMetadata>;
 }
 
 export interface SessionDeleteParams {
-  sessionId: string;
+  sessionId: SessionId;
 }
 
 export interface ToolCallParams {
@@ -348,11 +366,11 @@ export class CursorError extends AdapterError {
 }
 
 export class SessionError extends AdapterError {
-  readonly sessionId?: string | undefined;
+  readonly sessionId?: SessionId | undefined;
 
   constructor(
     message: string,
-    sessionId?: string | undefined,
+    sessionId?: SessionId | undefined,
     cause?: Error | undefined
   ) {
     super(message, 'SESSION_ERROR', cause);

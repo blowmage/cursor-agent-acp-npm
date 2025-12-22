@@ -143,7 +143,7 @@ describe('Stdio Transport Integration Tests', () => {
         },
       } as Request);
 
-      expect(sessionResponse.id).toBe(2);
+      expect(sessionResponse.id).toBe(2n);
       expect(sessionResponse.result).toBeDefined();
       expect((sessionResponse.result as any).sessionId).toBeDefined();
     });
@@ -364,7 +364,7 @@ describe('Stdio Transport Integration Tests', () => {
 
       // The prompt might succeed or fail, but should return a valid response
       expect(promptResponse.jsonrpc).toBe('2.0');
-      expect(promptResponse.id).toBe(2);
+      expect(promptResponse.id).toBe(2n);
       // Either result or error should be defined
       expect(
         promptResponse.result !== undefined ||
@@ -398,7 +398,7 @@ describe('Stdio Transport Integration Tests', () => {
       // Verify all sessions were created
       expect(responses).toHaveLength(5);
       responses.forEach((response, index) => {
-        expect(response.id).toBe(index + 1);
+        expect(response.id).toBe(BigInt(index + 1));
         expect((response.result as any).sessionId).toBeDefined();
       });
 

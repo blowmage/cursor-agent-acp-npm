@@ -320,21 +320,24 @@ describe('session/new - Parameter Validation', () => {
       expect(response.error).toBeUndefined();
     });
 
-    it('should default mcpServers to empty array when missing', async () => {
+    it('should reject session/new when mcpServers is missing (per ACP SDK)', async () => {
+      // Per ACP SDK: mcpServers is required (Array<McpServer>)
       const request: AcpRequest = {
         jsonrpc: '2.0',
         method: 'session/new',
         id: 'test-mcp-2',
         params: {
           cwd: '/test/project',
-          // mcpServers intentionally omitted
+          // mcpServers intentionally omitted - should error
         },
       };
 
       const response = await adapter.processRequest(request);
 
-      expect(response.result).toBeDefined();
-      expect(response.result.sessionId).toBeDefined();
+      expect(response.error).toBeDefined();
+      expect(response.error?.message).toContain(
+        'mcpServers is required and must be an array'
+      );
     });
 
     it('should accept session/new with single MCP server', async () => {

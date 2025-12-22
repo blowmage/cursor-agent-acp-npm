@@ -8,11 +8,16 @@
 import type {
   RequestPermissionRequest,
   PermissionOption,
+  RequestId,
+  Error as JsonRpcError,
 } from '@agentclientprotocol/sdk';
 import type { AnyRequest } from '@agentclientprotocol/sdk/dist/jsonrpc.js';
-import type { Error as JsonRpcError } from '@agentclientprotocol/sdk';
 import { ProtocolError, type Logger, type PermissionOutcome } from '../types';
-import { validateObjectParams, createErrorResponse } from '../utils/json-rpc';
+import {
+  validateObjectParams,
+  createErrorResponse,
+  toRequestId,
+} from '../utils/json-rpc';
 
 export interface PermissionHandlerOptions {
   logger: Logger;
@@ -89,7 +94,7 @@ export class PermissionsHandler {
    */
   async handlePermissionRequest(request: AnyRequest): Promise<{
     jsonrpc: '2.0';
-    id: string | number | null;
+    id: RequestId;
     result?: any | null;
     error?: JsonRpcError;
   }> {
@@ -99,7 +104,7 @@ export class PermissionsHandler {
       'session/request_permission'
     );
     if (!validation.valid) {
-      return createErrorResponse(request.id, validation.error);
+      return createErrorResponse(toRequestId(request.id), validation.error);
     }
 
     const params = validation.params;
@@ -157,7 +162,7 @@ export class PermissionsHandler {
     return <
       {
         jsonrpc: '2.0';
-        id: string | number | null;
+        id: RequestId;
         result?: any | null;
         error?: JsonRpcError;
       }
