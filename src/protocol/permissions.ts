@@ -6,13 +6,17 @@
  */
 
 import type {
-  Request,
-  Request1,
   RequestPermissionRequest,
   PermissionOption,
+  RequestId,
+  _Error as JsonRpcError,
 } from '@agentclientprotocol/sdk';
-import type { Error as JsonRpcError } from '@agentclientprotocol/sdk';
-import { ProtocolError, type Logger, type PermissionOutcome } from '../types';
+import {
+  ProtocolError,
+  type JsonRpcRequest,
+  type Logger,
+  type PermissionOutcome,
+} from '../types';
 import { validateObjectParams, createErrorResponse } from '../utils/json-rpc';
 
 export interface PermissionHandlerOptions {
@@ -88,9 +92,9 @@ export class PermissionsHandler {
    * However, in our architecture, we need to return a request ID and handle
    * the response asynchronously.
    */
-  async handlePermissionRequest(request: Request | Request1): Promise<{
+  async handlePermissionRequest(request: JsonRpcRequest): Promise<{
     jsonrpc: '2.0';
-    id: string | number | null;
+    id: RequestId;
     result?: any | null;
     error?: JsonRpcError;
   }> {
@@ -158,7 +162,7 @@ export class PermissionsHandler {
     return <
       {
         jsonrpc: '2.0';
-        id: string | number | null;
+        id: RequestId;
         result?: any | null;
         error?: JsonRpcError;
       }
