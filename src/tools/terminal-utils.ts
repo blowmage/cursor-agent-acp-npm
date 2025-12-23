@@ -357,21 +357,25 @@ export async function executeWithProgress(
   };
 
   try {
-    // Report tool call with terminal embedded
+    // Per ACP spec: Tool call lifecycle is pending -> in_progress -> completed/failed
+    // See: https://agentclientprotocol.com/protocol/prompt-turn#5-tool-invocation-and-status-reporting
+
+    // Step 1: Report tool call with pending status
     const toolCallId = await toolCallManager.reportToolCall(
       sessionId,
       'execute_command',
       {
         title: options.title ?? `$ ${command} ${args.join(' ')}`,
-        kind: 'edit', // Default to edit, can be overridden by caller
-        status: 'in_progress',
+        kind: 'execute',
+        status: 'pending',
         rawInput: { command, args, cwd: options.cwd },
       }
     );
 
-    // Embed terminal in tool call for live output streaming
+    // Step 2: Update to in_progress and embed terminal for live output streaming
     const terminalContent = toolCallManager.createTerminalContent(terminal.id);
     await toolCallManager.updateToolCall(sessionId, toolCallId, {
+      status: 'in_progress',
       content: terminalContent,
     });
 

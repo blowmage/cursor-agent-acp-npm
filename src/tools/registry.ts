@@ -170,33 +170,41 @@ export class ToolRegistry {
         };
       }
 
-      // Report tool call start
+      // Per ACP spec: Tool call lifecycle is pending -> in_progress -> completed/failed
+      // See: https://agentclientprotocol.com/protocol/prompt-turn#5-tool-invocation-and-status-reporting
       if (shouldReportToolCalls) {
         const toolKind = this.getToolKind(toolCall.name);
         const locations = this.extractLocations(toolCall.parameters);
         const reportOptions: {
           title: string;
           kind: ToolKind;
-          status: 'in_progress';
+          status: 'pending';
           rawInput: Record<string, any>;
           locations?: ToolCallLocation[];
         } = {
           title: this.getToolTitle(toolCall.name, toolCall.parameters),
           kind: toolKind,
-          status: 'in_progress',
+          status: 'pending',
           rawInput: toolCall.parameters,
         };
         if (locations.length > 0) {
           reportOptions.locations = locations;
         }
+
+        // Step 1: Report tool call with pending status
         toolCallId = await this.toolCallManager!.reportToolCall(
           sessionId!,
           toolCall.name,
           reportOptions
         );
+
+        // Step 2: Update to in_progress when execution starts
+        await this.toolCallManager!.updateToolCall(sessionId!, toolCallId, {
+          status: 'in_progress',
+        });
       }
 
-      // Execute the tool
+      // Step 3: Execute the tool
       // Per ACP spec: Inject sessionId into parameters for ACP operations
       // The _sessionId parameter is used by ACP-compliant tools (filesystem, etc.)
       const paramsWithSession = sessionId
@@ -343,23 +351,70 @@ export class ToolRegistry {
 
   /**
    * Get the ACP tool kind for a tool name
+   * Per ACP spec: ToolKind = "read" | "edit" | "delete" | "move" | "search" | "execute" | "think" | "fetch" | "switch_mode" | "other"
    */
   private getToolKind(toolName: string): ToolKind {
     // Map tool names to ACP tool kinds
     const kindMap: Record<string, ToolKind> = {
-      // Filesystem tools (ACP-compliant only)
+      // Filesystem tools - read
       read_file: 'read',
-      write_file: 'edit',
-      move_file: 'move',
       copy_file: 'read',
+      list_directory: 'read',
+      get_file_info: 'read',
 
-      // Cursor tools
+      // Filesystem tools - edit
+      write_file: 'edit',
+      append_file: 'edit',
+      create_file: 'edit',
+      patch_file: 'edit',
+
+      // Filesystem tools - delete
+      delete_file: 'delete',
+      remove_file: 'delete',
+      remove_directory: 'delete',
+
+      // Filesystem tools - move
+      move_file: 'move',
+      rename_file: 'move',
+
+      // Search tools
       search_codebase: 'search',
+      search_files: 'search',
+      grep: 'search',
+      find_files: 'search',
+      find_references: 'search',
+      find_definitions: 'search',
+
+      // Execute tools
+      run_tests: 'execute',
+      run_command: 'execute',
+      execute_command: 'execute',
+      run_script: 'execute',
+      shell: 'execute',
+
+      // Fetch tools (network/HTTP operations)
+      fetch_url: 'fetch',
+      http_request: 'fetch',
+      download_file: 'fetch',
+      api_request: 'fetch',
+      web_search: 'fetch',
+
+      // Think tools (reasoning/planning)
+      think: 'think',
+      reason: 'think',
+      plan: 'think',
+      analyze: 'think',
+
+      // Switch mode tools
+      switch_mode: 'switch_mode',
+      set_mode: 'switch_mode',
+      change_mode: 'switch_mode',
+
+      // Cursor-specific tools
       analyze_code: 'read',
       apply_code_changes: 'edit',
-      run_tests: 'execute',
       get_project_info: 'read',
-      explain_code: 'read',
+      explain_code: 'think',
     };
 
     return kindMap[toolName] || 'other';
@@ -374,24 +429,96 @@ export class ToolRegistry {
   ): string {
     // Create descriptive titles based on tool and parameters
     switch (toolName) {
+      // Read operations
       case 'read_file':
         return `Reading file: ${parameters['path'] || 'unknown'}`;
+      case 'copy_file':
+        return `Copying file: ${parameters['source'] || 'unknown'}`;
+      case 'list_directory':
+        return `Listing directory: ${parameters['path'] || 'unknown'}`;
+      case 'get_file_info':
+        return `Getting file info: ${parameters['path'] || 'unknown'}`;
+
+      // Edit operations
       case 'write_file':
         return `Writing file: ${parameters['path'] || 'unknown'}`;
-      case 'move_file':
-        return `Moving file: ${parameters['source'] || 'unknown'} → ${parameters['destination'] || 'unknown'}`;
-      case 'search_codebase':
-        return `Searching codebase: ${parameters['query'] || 'unknown'}`;
-      case 'analyze_code':
-        return `Analyzing: ${parameters['file_path'] || 'unknown'}`;
+      case 'append_file':
+        return `Appending to file: ${parameters['path'] || 'unknown'}`;
+      case 'create_file':
+        return `Creating file: ${parameters['path'] || 'unknown'}`;
+      case 'patch_file':
+        return `Patching file: ${parameters['path'] || 'unknown'}`;
       case 'apply_code_changes':
         return `Applying ${Array.isArray(parameters['changes']) ? parameters['changes'].length : 0} code changes`;
+
+      // Delete operations
+      case 'delete_file':
+      case 'remove_file':
+        return `Deleting file: ${parameters['path'] || 'unknown'}`;
+      case 'remove_directory':
+        return `Removing directory: ${parameters['path'] || 'unknown'}`;
+
+      // Move operations
+      case 'move_file':
+      case 'rename_file':
+        return `Moving file: ${parameters['source'] || parameters['from'] || 'unknown'} → ${parameters['destination'] || parameters['to'] || 'unknown'}`;
+
+      // Search operations
+      case 'search_codebase':
+        return `Searching codebase: ${parameters['query'] || 'unknown'}`;
+      case 'search_files':
+      case 'grep':
+        return `Searching for: ${parameters['pattern'] || parameters['query'] || 'unknown'}`;
+      case 'find_files':
+        return `Finding files: ${parameters['pattern'] || 'unknown'}`;
+      case 'find_references':
+        return `Finding references: ${parameters['symbol'] || 'unknown'}`;
+      case 'find_definitions':
+        return `Finding definitions: ${parameters['symbol'] || 'unknown'}`;
+
+      // Execute operations
       case 'run_tests':
         return `Running tests: ${parameters['test_pattern'] || 'all'}`;
-      case 'get_project_info':
-        return 'Getting project information';
+      case 'run_command':
+      case 'execute_command':
+      case 'shell':
+        return `Running: ${parameters['command'] || 'unknown'}`;
+      case 'run_script':
+        return `Running script: ${parameters['script'] || 'unknown'}`;
+
+      // Fetch operations
+      case 'fetch_url':
+      case 'http_request':
+        return `Fetching: ${parameters['url'] || 'unknown'}`;
+      case 'download_file':
+        return `Downloading: ${parameters['url'] || 'unknown'}`;
+      case 'api_request':
+        return `API request: ${parameters['endpoint'] || parameters['url'] || 'unknown'}`;
+      case 'web_search':
+        return `Web search: ${parameters['query'] || 'unknown'}`;
+
+      // Think operations
+      case 'think':
+      case 'reason':
+        return `Thinking: ${parameters['topic'] || parameters['question'] || 'reasoning'}`;
+      case 'plan':
+        return `Planning: ${parameters['goal'] || 'next steps'}`;
+      case 'analyze':
+      case 'analyze_code':
+        return `Analyzing: ${parameters['file_path'] || parameters['target'] || 'unknown'}`;
       case 'explain_code':
         return `Explaining code: ${parameters['file_path'] || 'unknown'}`;
+
+      // Switch mode operations
+      case 'switch_mode':
+      case 'set_mode':
+      case 'change_mode':
+        return `Switching to mode: ${parameters['mode'] || parameters['mode_id'] || 'unknown'}`;
+
+      // Cursor-specific
+      case 'get_project_info':
+        return 'Getting project information';
+
       default:
         return `Executing tool: ${toolName}`;
     }

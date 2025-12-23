@@ -8,11 +8,27 @@
 import type {
   ContentBlock,
   Role,
+  RequestId,
   RequestPermissionRequest,
   SessionMode,
   SessionModeId,
   SessionModeState,
 } from '@agentclientprotocol/sdk';
+
+// ============================================================================
+// JSON-RPC Types
+// ============================================================================
+
+/**
+ * Generic JSON-RPC 2.0 request type
+ * Used for request routing before dispatching to specific handlers
+ */
+export interface JsonRpcRequest {
+  jsonrpc: '2.0';
+  id?: RequestId;
+  method: string;
+  params?: unknown;
+}
 
 // ============================================================================
 // Internal Implementation Types

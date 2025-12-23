@@ -5,7 +5,10 @@
  * Per spec: https://www.jsonrpc.org/specification
  */
 
-import type { Error as JsonRpcError } from '@agentclientprotocol/sdk';
+import type {
+  _Error as JsonRpcError,
+  RequestId,
+} from '@agentclientprotocol/sdk';
 
 /**
  * Result of parameter validation
@@ -95,21 +98,21 @@ export function validateObjectParams(
 /**
  * Creates a JSON-RPC 2.0 error response
  *
- * @param id - The request ID
+ * @param id - The request ID (per ACP SDK: null | bigint | string)
  * @param error - The error object
  * @returns JSON-RPC error response
  */
 export function createErrorResponse(
-  id: string | number | null,
+  id: RequestId | undefined,
   error: JsonRpcError
 ): {
   jsonrpc: '2.0';
-  id: string | number | null;
+  id: RequestId;
   error: JsonRpcError;
 } {
   return {
     jsonrpc: '2.0',
-    id,
+    id: id ?? null,
     error,
   };
 }
@@ -117,21 +120,21 @@ export function createErrorResponse(
 /**
  * Creates a JSON-RPC 2.0 success response
  *
- * @param id - The request ID
+ * @param id - The request ID (per ACP SDK: null | bigint | string)
  * @param result - The result object
  * @returns JSON-RPC success response
  */
 export function createSuccessResponse<T>(
-  id: string | number | null,
+  id: RequestId | undefined,
   result: T
 ): {
   jsonrpc: '2.0';
-  id: string | number | null;
+  id: RequestId;
   result: T;
 } {
   return {
     jsonrpc: '2.0',
-    id,
+    id: id ?? null,
     result,
   };
 }

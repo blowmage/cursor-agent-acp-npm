@@ -309,7 +309,10 @@ describe('CursorAgentAdapter - session/load', () => {
       const response = await adapter.processRequest(request);
 
       expect(response.error).toBeDefined();
-      expect(response.error?.message).toContain('cwd must be a string');
+      // Per ACP SDK: cwd is required and must be a non-empty string
+      expect(response.error?.message).toContain(
+        'cwd (working directory) is required and must be a non-empty string'
+      );
     });
   });
 
