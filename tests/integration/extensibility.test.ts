@@ -97,6 +97,7 @@ describe('Extensibility Integration', () => {
         method: 'session/new',
         params: {
           cwd: process.cwd(),
+          mcpServers: [], // Required per ACP SDK
         },
       });
 

@@ -846,8 +846,14 @@ export class CursorAgentAdapter implements ClientConnection {
       );
     }
 
-    // Per ACP spec: mcpServers is required (can be empty array)
-    const mcpServers = params.mcpServers || [];
+    // Per ACP SDK: mcpServers is required (Array<McpServer>)
+    // Must be an array, can be empty if no MCP servers needed
+    if (!Array.isArray(params.mcpServers)) {
+      throw new ProtocolError(
+        'mcpServers is required and must be an array (can be empty)'
+      );
+    }
+    const mcpServers = params.mcpServers;
 
     // Validate cwd is an absolute path
     const cwd = params.cwd;
@@ -955,13 +961,18 @@ export class CursorAgentAdapter implements ClientConnection {
       throw new ProtocolError('sessionId is required');
     }
 
-    // Per ACP spec: cwd and mcpServers are required parameters
-    if (!params.cwd) {
-      throw new ProtocolError('cwd is required');
+    // Per ACP SDK: cwd is required and must be a non-empty string
+    if (typeof params.cwd !== 'string' || params.cwd.trim() === '') {
+      throw new ProtocolError(
+        'cwd (working directory) is required and must be a non-empty string'
+      );
     }
 
-    if (!params.mcpServers) {
-      throw new ProtocolError('mcpServers is required');
+    // Per ACP SDK: mcpServers is required (Array<McpServer>)
+    if (!Array.isArray(params.mcpServers)) {
+      throw new ProtocolError(
+        'mcpServers is required and must be an array (can be empty)'
+      );
     }
 
     const sessionId = params.sessionId;
