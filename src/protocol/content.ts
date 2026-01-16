@@ -399,12 +399,13 @@ export class ContentProcessor {
     // If we're in a code block but it wasn't closed, treat remaining as code
     if (state.inCodeBlock && state.accumulatedContent.trim()) {
       const language = state.codeLanguage || '';
+      // Add leading and trailing newlines for code block separation
       result = {
         type: 'text',
-        text: `\`\`\`${language}\n${state.accumulatedContent}\n\`\`\``,
+        text: `\n\`\`\`${language}\n${state.accumulatedContent}\n\`\`\`\n`,
       };
     } else if (state.accumulatedContent.trim()) {
-      // Flush any remaining text
+      // Flush any remaining text as-is for natural concatenation
       result = {
         type: 'text',
         text: state.accumulatedContent,
@@ -420,6 +421,38 @@ export class ContentProcessor {
    * Handles cases where code blocks arrive across multiple chunks
    */
   async processStreamChunk(chunkData: any): Promise<ContentBlock | null> {
+    // If chunkData is already a ContentBlock object (from cursor-agent --output-format stream-json)
+    // Check if it needs newline wrapping for structural elements
+    if (chunkData && typeof chunkData === 'object' && chunkData.type) {
+      if (chunkData.type === 'text' && chunkData.text) {
+        const text = chunkData.text;
+        // Check if this is a structural element (code block, file, image) that needs newline separation
+        const trimmed = text.trim();
+        if (
+          trimmed.startsWith('```') ||
+          trimmed.startsWith('# File:') ||
+          trimmed.startsWith('# Image:') ||
+          text.includes('[Image data:')
+        ) {
+          // Structural element: ensure leading and trailing newlines
+          const hasLeadingNewline = text.startsWith('\n');
+          const hasTrailingNewline = text.endsWith('\n');
+          const wrappedText =
+            (hasLeadingNewline ? '' : '\n') +
+            text +
+            (hasTrailingNewline ? '' : '\n');
+          return {
+            ...chunkData,
+            text: wrappedText,
+          };
+        }
+        // Regular text: return as-is to allow seamless concatenation
+        return chunkData as ContentBlock;
+      }
+      // For non-text blocks, return as-is
+      return chunkData as ContentBlock;
+    }
+
     if (!chunkData || typeof chunkData !== 'string') {
       return null;
     }
@@ -465,6 +498,7 @@ export class ContentProcessor {
           }
 
           // Return text block - code block will be processed on next chunk
+          // Don't add newline - let text concatenate naturally
           return {
             type: 'text',
             text: textToReturn,
@@ -512,10 +546,10 @@ export class ContentProcessor {
               };
             }
 
-            // Return image reference
+            // Return image reference with surrounding newlines for separation
             return {
               type: 'text',
-              text: imageText,
+              text: '\n' + imageText + '\n',
             };
           }
         }
@@ -577,10 +611,11 @@ export class ContentProcessor {
 
           if (codeContent.length > 0 || closingIndex > 0) {
             // Complete code block found - convert to text with code formatting
+            // Add leading and trailing newlines to ensure proper separation when concatenated
             const language = state.codeLanguage || '';
             const result: ContentBlock = {
               type: 'text',
-              text: `\`\`\`${language}\n${codeContent}\n\`\`\``,
+              text: `\n\`\`\`${language}\n${codeContent}\n\`\`\`\n`,
             };
 
             // Reset state - remaining content will be processed in next chunk
@@ -603,6 +638,7 @@ export class ContentProcessor {
     if (accumulated.length > 100) {
       const textToReturn = accumulated;
       state.accumulatedContent = '';
+      // Return as-is to allow natural text concatenation
       return {
         type: 'text',
         text: textToReturn,
@@ -675,6 +711,7 @@ export class ContentProcessor {
     } else if (trimmed.startsWith('# Image:')) {
       return this.parseImageSection(trimmed);
     }
+    // Regular text: return as-is to allow seamless concatenation
     return {
       type: 'text',
       text: trimmed,
@@ -683,28 +720,31 @@ export class ContentProcessor {
 
   /**
    * Parse code section - returns as text with code formatting
+   * Add leading and trailing newlines to ensure proper separation when concatenated
    */
   private parseCodeSection(section: string): ContentBlock {
-    // Return the code section as-is (already formatted with ```)
+    // Return the code section with surrounding newlines
     return {
       type: 'text',
-      text: section,
+      text: '\n' + section + '\n',
     };
   }
 
   /**
    * Parse file section
+   * Add leading and trailing newlines to ensure proper separation when concatenated
    */
   private parseFileSection(section: string): ContentBlock {
     // Return file section as text (SDK ContentBlock doesn't support custom fields)
     return {
       type: 'text',
-      text: section,
+      text: '\n' + section + '\n',
     };
   }
 
   /**
    * Parse image section
+   * Add leading and trailing newlines to ensure proper separation when concatenated
    */
   private parseImageSection(
     section: string
@@ -713,7 +753,7 @@ export class ContentProcessor {
     // In a real implementation, you might extract base64 data
     return {
       type: 'text',
-      text: section,
+      text: '\n' + section + '\n',
     };
   }
 
