@@ -12,12 +12,15 @@
  */
 
 import type {
-  ToolKind,
+  ToolCall,
+  ToolCallUpdate,
+  ToolCallId,
   ToolCallContent,
-  ToolCallLocation,
   ToolCallStatus,
   PermissionOption,
+  SessionId,
   SessionNotification,
+  SessionUpdate,
   ContentBlock,
 } from '@agentclientprotocol/sdk';
 
@@ -39,8 +42,8 @@ import {
  * all protocol communications while maintaining internal state here.
  */
 export interface ToolCallInfo {
-  toolCallId: string;
-  sessionId: string;
+  toolCallId: ToolCallId;
+  sessionId: SessionId;
   toolName: string;
   status: ToolCallStatus;
   startTime: Date;
@@ -85,7 +88,7 @@ export class ToolCallManager {
   /**
    * Generate a unique tool call ID
    */
-  generateToolCallId(toolName: string): string {
+  generateToolCallId(toolName: string): ToolCallId {
     this.toolCallCounter++;
     return `tool_${toolName}_${Date.now()}_${this.toolCallCounter}`;
   }
@@ -93,41 +96,53 @@ export class ToolCallManager {
   /**
    * Report a new tool call to the client
    * Per ACP spec: Send session/update notification with tool_call
-   * Now uses SDK types with _meta support
-   * Defaults to in_progress status
+   *
+   * Uses SDK ToolCall type directly (minus auto-generated toolCallId)
+   * Defaults to 'pending' status per ACP spec (tool_call -> pending -> in_progress -> completed/failed)
+   * See: https://agentclientprotocol.com/protocol/prompt-turn#5-tool-invocation-and-status-reporting
+   *
+   * @param sessionId - The session to report the tool call for
+   * @param toolName - Internal tool name (stored in _meta, not sent in protocol)
+   * @param options - SDK ToolCall fields (toolCallId is auto-generated)
    */
   async reportToolCall(
     sessionId: string,
     toolName: string,
-    options: {
-      title: string;
-      kind: ToolKind;
-      status?: ToolCallStatus;
-      rawInput?: Record<string, any>;
-      locations?: ToolCallLocation[];
-    }
-  ): Promise<string> {
-    const toolCallId = this.generateToolCallId(toolName);
+    options: Omit<ToolCall, 'toolCallId'> & { toolCallId?: ToolCallId }
+  ): Promise<ToolCallId> {
+    const toolCallId = options.toolCallId || this.generateToolCallId(toolName);
     const now = new Date();
-    const status = options.status || 'in_progress'; // Better default
+    const status = options.status || 'pending';
+
+    // Build SDK-compliant ToolCall for the update
+    const toolCall: ToolCall = {
+      toolCallId,
+      title: options.title,
+      ...(options.kind !== undefined && { kind: options.kind }),
+      status,
+      ...(options.locations && { locations: options.locations }),
+      ...(options.rawInput !== undefined && { rawInput: options.rawInput }),
+      ...(options.content && { content: options.content }),
+      ...(options.rawOutput !== undefined && { rawOutput: options.rawOutput }),
+      // Merge user _meta with internal tracking
+      _meta: {
+        ...(options._meta || {}),
+        toolName,
+        startTime: now.toISOString(),
+        source: 'tool-call-manager',
+      },
+    };
+
+    // Build the session update
+    const update: SessionUpdate = {
+      sessionUpdate: 'tool_call',
+      ...toolCall,
+    };
 
     // Build SDK-compliant SessionNotification
     const notification: SessionNotification = {
       sessionId,
-      update: {
-        sessionUpdate: 'tool_call',
-        toolCallId,
-        title: options.title,
-        kind: options.kind,
-        status,
-        ...(options.locations && { locations: options.locations }),
-        ...(options.rawInput && { rawInput: options.rawInput }),
-        _meta: {
-          toolName,
-          startTime: now.toISOString(),
-          source: 'tool-call-manager',
-        },
-      },
+      update,
       _meta: {
         timestamp: now.toISOString(),
         notificationSequence: this.notificationSequence++,
@@ -167,18 +182,17 @@ export class ToolCallManager {
   /**
    * Update an existing tool call
    * Per ACP spec: Send session/update notification with tool_call_update
-   * Now uses SDK types with _meta support
+   *
+   * Uses SDK ToolCallUpdate type directly (minus required toolCallId which is passed separately)
+   *
+   * @param sessionId - The session the tool call belongs to
+   * @param toolCallId - The ID of the tool call to update
+   * @param updates - SDK ToolCallUpdate fields (only include fields being updated)
    */
   async updateToolCall(
     sessionId: string,
-    toolCallId: string,
-    updates: {
-      title?: string;
-      status?: ToolCallStatus;
-      content?: ToolCallContent[];
-      locations?: ToolCallLocation[];
-      rawOutput?: Record<string, any>;
-    }
+    toolCallId: ToolCallId,
+    updates: Omit<ToolCallUpdate, 'toolCallId'>
   ): Promise<void> {
     const toolCallInfo = this.activeToolCalls.get(toolCallId);
 
@@ -209,25 +223,34 @@ export class ToolCallManager {
       updates,
     });
 
-    // Build SDK-compliant update (only include fields being updated)
-    const updatePayload: SessionNotification['update'] = {
-      sessionUpdate: 'tool_call_update',
+    // Build SDK-compliant ToolCallUpdate (only include fields being updated)
+    const toolCallUpdate: ToolCallUpdate = {
       toolCallId,
       ...(updates.title !== undefined && { title: updates.title }),
+      ...(updates.kind !== undefined && { kind: updates.kind }),
       ...(updates.status !== undefined && { status: updates.status }),
       ...(updates.content !== undefined && { content: updates.content }),
       ...(updates.locations !== undefined && { locations: updates.locations }),
+      ...(updates.rawInput !== undefined && { rawInput: updates.rawInput }),
       ...(updates.rawOutput !== undefined && { rawOutput: updates.rawOutput }),
+      // Merge user _meta with internal tracking
       _meta: {
+        ...(updates._meta || {}),
         updateTime: now.toISOString(),
         source: 'tool-call-manager',
       },
     };
 
+    // Build the session update
+    const update: SessionUpdate = {
+      sessionUpdate: 'tool_call_update',
+      ...toolCallUpdate,
+    };
+
     // Build full notification
     const notification: SessionNotification = {
       sessionId,
-      update: updatePayload,
+      update,
       _meta: {
         timestamp: now.toISOString(),
         notificationSequence: this.notificationSequence++,

@@ -810,6 +810,7 @@ export class ContentProcessor {
 
   /**
    * Format data size for display
+   * Handles both number and bigint (SDK uses bigint for file sizes)
    */
   private formatDataSize(bytes: number | bigint): string {
     const units = ['B', 'KB', 'MB', 'GB'];
@@ -1054,12 +1055,14 @@ export class ContentProcessor {
         ) {
           errors.push(`Block ${index}: mimeType must be a string or null`);
         }
+        // Per ACP SDK: size is bigint | null (not number)
         if (
           block.size !== undefined &&
           block.size !== null &&
-          typeof block.size !== 'number'
+          typeof block.size !== 'bigint' &&
+          typeof block.size !== 'number' // Accept number for backwards compatibility
         ) {
-          errors.push(`Block ${index}: size must be a number or null`);
+          errors.push(`Block ${index}: size must be a bigint or null`);
         }
         break;
       default:

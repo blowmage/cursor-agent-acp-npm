@@ -83,7 +83,7 @@ describe('ToolCallManager', () => {
             toolCallId,
             title: 'Searching codebase',
             kind: 'search',
-            status: 'in_progress',
+            status: 'pending',
             rawInput: { query: 'test' },
             _meta: {
               toolName: 'search',
@@ -122,14 +122,14 @@ describe('ToolCallManager', () => {
       });
     });
 
-    it('should default to in_progress status', async () => {
-      // Changed default from pending to in_progress
+    it('should default to pending status per ACP spec', async () => {
+      // Per ACP spec: tool_call lifecycle is pending -> in_progress -> completed/failed
       await manager.reportToolCall('session1', 'test', {
         title: 'Test',
         kind: 'other',
       });
 
-      expect(sentNotifications[0]!.params.update.status).toBe('in_progress');
+      expect(sentNotifications[0]!.params.update.status).toBe('pending');
     });
 
     it('should allow custom initial status', async () => {
@@ -568,7 +568,7 @@ describe('ToolCallManager', () => {
         toolCallId,
         sessionId: 'session1',
         toolName: 'test',
-        status: 'in_progress',
+        status: 'pending',
       });
       expect(info?.startTime).toBeInstanceOf(Date);
     });

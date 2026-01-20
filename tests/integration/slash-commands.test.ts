@@ -257,6 +257,7 @@ describe('Slash Commands Integration', () => {
         method: 'session/new' as const,
         params: {
           cwd: process.cwd(),
+          mcpServers: [], // Required per ACP SDK
         },
       };
 

@@ -89,7 +89,7 @@ describe('CursorAgentAdapter - Extensibility', () => {
       const response = await adapter.processRequest(request);
 
       expect(response.jsonrpc).toBe('2.0');
-      expect(response.id).toBe(1);
+      expect(response.id).toBe(1n);
       expect(response.result).toEqual({ result: 'success' });
       expect(handler).toHaveBeenCalledWith({ param: 'value' });
     });
@@ -105,7 +105,7 @@ describe('CursorAgentAdapter - Extensibility', () => {
       const response = await adapter.processRequest(request);
 
       expect(response.jsonrpc).toBe('2.0');
-      expect(response.id).toBe(1);
+      expect(response.id).toBe(1n);
       expect(response.error).toBeDefined();
       expect(response.error?.code).toBe(-32601);
       expect(response.error?.message).toBe('Method not found');
@@ -184,7 +184,7 @@ describe('CursorAgentAdapter - Extensibility', () => {
       const response = await adapter.processRequest(request);
 
       expect(response.jsonrpc).toBe('2.0');
-      expect(response.id).toBe(1);
+      expect(response.id).toBe(1n);
       expect(response.error).toBeDefined();
       expect(response.error?.code).toBe(-32603);
       expect(response.error?.message).toBe('Handler execution failed');
