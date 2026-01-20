@@ -804,9 +804,37 @@ export class ContentProcessor {
    */
   private formatDataSize(bytes: number | bigint): string {
     const units = ['B', 'KB', 'MB', 'GB'];
-    let size = typeof bytes === 'bigint' ? Number(bytes) : bytes;
     let unitIndex = 0;
 
+    // Handle bigint inputs carefully to avoid precision loss when converting to number.
+    if (typeof bytes === 'bigint') {
+      const maxSafeBigInt = BigInt(Number.MAX_SAFE_INTEGER);
+
+      // If within the safe integer range, convert directly and reuse number logic.
+      if (bytes <= maxSafeBigInt) {
+        let size = Number(bytes);
+        while (size >= 1024 && unitIndex < units.length - 1) {
+          size /= 1024;
+          unitIndex++;
+        }
+        return `${size.toFixed(1)}${units[unitIndex]}`;
+      }
+
+      // For very large values, scale using bigint arithmetic until the size is small
+      // enough that conversion to number is safe and precise.
+      let sizeBig = bytes;
+      const kBig = 1024n;
+      while (sizeBig >= kBig && unitIndex < units.length - 1) {
+        sizeBig /= kBig;
+        unitIndex++;
+      }
+
+      const size = Number(sizeBig); // sizeBig < 1024n here, so this conversion is safe.
+      return `${size.toFixed(1)}${units[unitIndex]}`;
+    }
+
+    // Default path for number inputs.
+    let size = bytes;
     while (size >= 1024 && unitIndex < units.length - 1) {
       size /= 1024;
       unitIndex++;
