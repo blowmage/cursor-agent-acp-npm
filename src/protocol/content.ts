@@ -315,7 +315,9 @@ export class ContentProcessor {
       value += `Type: ${block.mimeType}\n`;
     }
     if (block.size !== undefined && block.size !== null) {
-      value += `Size: ${this.formatDataSize(block.size)}\n`;
+      const sizeValue =
+        typeof block.size === 'bigint' ? Number(block.size) : block.size;
+      value += `Size: ${this.formatDataSize(sizeValue)}\n`;
     }
 
     return {
@@ -800,9 +802,9 @@ export class ContentProcessor {
   /**
    * Format data size for display
    */
-  private formatDataSize(bytes: number): string {
+  private formatDataSize(bytes: number | bigint): string {
     const units = ['B', 'KB', 'MB', 'GB'];
-    let size = bytes;
+    let size = typeof bytes === 'bigint' ? Number(bytes) : bytes;
     let unitIndex = 0;
 
     while (size >= 1024 && unitIndex < units.length - 1) {

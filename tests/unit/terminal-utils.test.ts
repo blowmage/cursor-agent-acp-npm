@@ -151,7 +151,7 @@ describe('Terminal Utilities', () => {
         args: ['test'],
         cwd: '/project',
         env: [{ name: 'NODE_ENV', value: 'test' }],
-        outputByteLimit: 10000,
+        outputByteLimit: 10000n,
       });
     });
 

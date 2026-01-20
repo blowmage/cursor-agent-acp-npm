@@ -6,14 +6,13 @@
  */
 
 import type {
-  Request,
-  Request1,
   ContentBlock,
   PromptRequest,
   PromptResponse,
   PlanEntry,
   SessionNotification,
 } from '@agentclientprotocol/sdk';
+import type { AnyRequest } from '@agentclientprotocol/sdk/dist/jsonrpc.js';
 import type { Error as JsonRpcError } from '@agentclientprotocol/sdk';
 import type { SlashCommandsRegistry } from '../tools/slash-commands';
 import {
@@ -850,7 +849,7 @@ export class PromptHandler {
    * Per ACP spec: Process prompt and return stopReason when complete.
    * Send session/update notifications during processing.
    */
-  async processPrompt(request: Request | Request1): Promise<{
+  async processPrompt(request: AnyRequest): Promise<{
     jsonrpc: '2.0';
     id: string | number | null;
     result?: any | null;

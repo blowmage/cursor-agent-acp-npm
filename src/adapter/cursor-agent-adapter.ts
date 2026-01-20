@@ -11,8 +11,6 @@
 import {
   AgentSideConnection,
   ndJsonStream,
-  type Request,
-  type Request1,
   type InitializeRequest,
   type InitializeResponse,
   type NewSessionRequest,
@@ -35,6 +33,7 @@ import {
   type WriteTextFileResponse,
 } from '@agentclientprotocol/sdk';
 import type { Error as JsonRpcError } from '@agentclientprotocol/sdk';
+import type { AnyRequest } from '@agentclientprotocol/sdk/dist/jsonrpc.js';
 import { CursorAgentImplementation } from './agent-implementation';
 import {
   AdapterError,
@@ -364,7 +363,7 @@ export class CursorAgentAdapter implements ClientConnection {
   /**
    * Process ACP request and return response
    */
-  async processRequest(request: Request | Request1): Promise<{
+  async processRequest(request: AnyRequest): Promise<{
     jsonrpc: '2.0';
     id: string | number | null;
     result?: any | null;
@@ -793,7 +792,7 @@ export class CursorAgentAdapter implements ClientConnection {
 
   // ACP Method handlers
 
-  private async handleInitialize(request: Request | Request1): Promise<{
+  private async handleInitialize(request: AnyRequest): Promise<{
     jsonrpc: '2.0';
     id: string | number | null;
     result?: any | null;
@@ -824,7 +823,7 @@ export class CursorAgentAdapter implements ClientConnection {
     };
   }
 
-  private async handleSessionNew(request: Request | Request1): Promise<{
+  private async handleSessionNew(request: AnyRequest): Promise<{
     jsonrpc: '2.0';
     id: string | number | null;
     result?: any | null;
@@ -936,7 +935,7 @@ export class CursorAgentAdapter implements ClientConnection {
     };
   }
 
-  private async handleSessionLoad(request: Request | Request1): Promise<{
+  private async handleSessionLoad(request: AnyRequest): Promise<{
     jsonrpc: '2.0';
     id: string | number | null;
     result?: any | null;
@@ -1065,7 +1064,7 @@ export class CursorAgentAdapter implements ClientConnection {
     };
   }
 
-  private async handleSetSessionMode(request: Request | Request1): Promise<{
+  private async handleSetSessionMode(request: AnyRequest): Promise<{
     jsonrpc: '2.0';
     id: string | number | null;
     result?: SetSessionModeResponse;
@@ -1112,7 +1111,7 @@ export class CursorAgentAdapter implements ClientConnection {
     };
   }
 
-  private async handleSetSessionModel(request: Request | Request1): Promise<{
+  private async handleSetSessionModel(request: AnyRequest): Promise<{
     jsonrpc: '2.0';
     id: string | number | null;
     result?: SetSessionModelResponse;
@@ -1159,7 +1158,7 @@ export class CursorAgentAdapter implements ClientConnection {
     };
   }
 
-  private async handleSessionList(request: Request | Request1): Promise<{
+  private async handleSessionList(request: AnyRequest): Promise<{
     jsonrpc: '2.0';
     id: string | number | null;
     result?: any | null;
@@ -1195,7 +1194,7 @@ export class CursorAgentAdapter implements ClientConnection {
     };
   }
 
-  private async handleSessionUpdate(request: Request | Request1): Promise<{
+  private async handleSessionUpdate(request: AnyRequest): Promise<{
     jsonrpc: '2.0';
     id: string | number | null;
     result?: any | null;
@@ -1233,7 +1232,7 @@ export class CursorAgentAdapter implements ClientConnection {
     };
   }
 
-  private async handleSessionDelete(request: Request | Request1): Promise<{
+  private async handleSessionDelete(request: AnyRequest): Promise<{
     jsonrpc: '2.0';
     id: string | number | null;
     result?: any | null;
@@ -1268,7 +1267,7 @@ export class CursorAgentAdapter implements ClientConnection {
     };
   }
 
-  private async handleSessionPrompt(request: Request | Request1): Promise<{
+  private async handleSessionPrompt(request: AnyRequest): Promise<{
     jsonrpc: '2.0';
     id: string | number | null;
     result?: any | null;
@@ -1280,7 +1279,7 @@ export class CursorAgentAdapter implements ClientConnection {
     return this.promptHandler.processPrompt(request);
   }
 
-  private async handleSessionCancel(request: Request | Request1): Promise<{
+  private async handleSessionCancel(request: AnyRequest): Promise<{
     jsonrpc: '2.0';
     id: string | number | null;
     result?: any | null;
@@ -1357,7 +1356,7 @@ export class CursorAgentAdapter implements ClientConnection {
     };
   }
 
-  private async handleToolsList(request: Request | Request1): Promise<{
+  private async handleToolsList(request: AnyRequest): Promise<{
     jsonrpc: '2.0';
     id: string | number | null;
     result?: any | null;
@@ -1389,7 +1388,7 @@ export class CursorAgentAdapter implements ClientConnection {
     };
   }
 
-  private async handleToolCall(request: Request | Request1): Promise<{
+  private async handleToolCall(request: AnyRequest): Promise<{
     jsonrpc: '2.0';
     id: string | number | null;
     result?: any | null;
@@ -1458,7 +1457,7 @@ export class CursorAgentAdapter implements ClientConnection {
     };
   }
 
-  private async handleRequestPermission(request: Request | Request1): Promise<{
+  private async handleRequestPermission(request: AnyRequest): Promise<{
     jsonrpc: '2.0';
     id: string | number | null;
     result?: any | null;
@@ -1758,7 +1757,7 @@ export class CursorAgentAdapter implements ClientConnection {
       id: 1,
       method: 'initialize',
       params,
-    } as unknown as Request);
+    } as unknown as AnyRequest);
 
     // Store the connection for filesystem operations
     this.agentConnection = connection;
@@ -1806,7 +1805,7 @@ export class CursorAgentAdapter implements ClientConnection {
       id: 1,
       method: 'session/new',
       params,
-    } as unknown as Request);
+    } as unknown as AnyRequest);
 
     return response.result as NewSessionResponse;
   }
@@ -1822,7 +1821,7 @@ export class CursorAgentAdapter implements ClientConnection {
       id: 1,
       method: 'session/load',
       params,
-    } as unknown as Request);
+    } as unknown as AnyRequest);
 
     return response.result as LoadSessionResponse;
   }
@@ -1946,7 +1945,7 @@ export class CursorAgentAdapter implements ClientConnection {
       id: 1,
       method: 'session/prompt',
       params,
-    } as unknown as Request);
+    } as unknown as AnyRequest);
 
     return response.result as PromptResponse;
   }
@@ -1960,7 +1959,7 @@ export class CursorAgentAdapter implements ClientConnection {
       id: null,
       method: 'session/cancel',
       params,
-    } as unknown as Request);
+    } as unknown as AnyRequest);
   }
 
   private async cleanup(): Promise<void> {
@@ -2008,7 +2007,7 @@ export class CursorAgentAdapter implements ClientConnection {
    * @param request - The extension method request
    * @returns JSON-RPC response with result or error
    */
-  private async handleExtensionMethod(request: Request | Request1): Promise<{
+  private async handleExtensionMethod(request: AnyRequest): Promise<{
     jsonrpc: '2.0';
     id: string | number | null;
     result?: Record<string, unknown> | null;

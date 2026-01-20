@@ -320,7 +320,7 @@ describe('TerminalManager', () => {
         args: ['test'],
         cwd: '/project',
         env: [{ name: 'NODE_ENV', value: 'test' }],
-        outputByteLimit: 10000,
+        outputByteLimit: 10000n,
       });
     });
 
@@ -364,7 +364,7 @@ describe('TerminalManager', () => {
       expect(client.createTerminal).toHaveBeenCalledWith({
         sessionId: 'session-1',
         command: 'echo',
-        outputByteLimit: 5000,
+        outputByteLimit: 5000n,
       });
     });
 
@@ -389,7 +389,7 @@ describe('TerminalManager', () => {
       expect(logger.warn).toHaveBeenCalledWith(
         'Output byte limit capped to maximum',
         expect.objectContaining({
-          requested: 50000,
+          requested: '50000',
           max: 10000,
         })
       );
@@ -397,7 +397,7 @@ describe('TerminalManager', () => {
       expect(client.createTerminal).toHaveBeenCalledWith({
         sessionId: 'session-1',
         command: 'echo',
-        outputByteLimit: 10000, // Capped
+        outputByteLimit: 10000n, // Capped
       });
     });
 
