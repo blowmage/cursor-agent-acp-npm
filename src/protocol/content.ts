@@ -620,13 +620,16 @@ export class ContentProcessor {
     }
 
     // Fallback: return accumulated content as text if substantial
+    // Don't normalize here - this is uncategorized text that hasn't matched
+    // any structural patterns. The earlier code paths (lines 514-537) already
+    // handle structural elements properly by extracting and normalizing them.
     if (accumulated.length > 100) {
       const textToReturn = accumulated;
       state.accumulatedContent = '';
-      // Normalize if it's a structural element, otherwise return as-is
+      // Return as-is - this is regular text that hasn't been categorized
       return {
         type: 'text',
-        text: this.normalizeStructuralElement(textToReturn),
+        text: textToReturn,
       };
     }
 
