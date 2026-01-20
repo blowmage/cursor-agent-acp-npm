@@ -315,9 +315,18 @@ export class ContentProcessor {
       value += `Type: ${block.mimeType}\n`;
     }
     if (block.size !== undefined && block.size !== null) {
-      const sizeValue =
-        typeof block.size === 'bigint' ? Number(block.size) : block.size;
-      value += `Size: ${this.formatDataSize(sizeValue)}\n`;
+      if (typeof block.size === 'bigint') {
+        const maxSafe = BigInt(Number.MAX_SAFE_INTEGER);
+        const minSafe = BigInt(Number.MIN_SAFE_INTEGER);
+        if (block.size <= maxSafe && block.size >= minSafe) {
+          value += `Size: ${this.formatDataSize(Number(block.size))}\n`;
+        } else {
+          // Avoid precision loss by not converting very large bigint to number
+          value += `Size: ${block.size.toString()} bytes\n`;
+        }
+      } else {
+        value += `Size: ${this.formatDataSize(block.size)}\n`;
+      }
     }
 
     return {
