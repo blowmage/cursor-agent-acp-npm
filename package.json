@@ -67,28 +67,28 @@
     "node": ">=18.14.0"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "^0.5.1",
+    "@agentclientprotocol/sdk": "^0.13.0",
     "commander": "^14.0.2",
     "uuid": "^13.0.0",
-    "winston": "^3.18.3"
+    "winston": "^3.19.0"
   },
   "devDependencies": {
-    "@eslint/eslintrc": "^3.3.1",
-    "@eslint/js": "^9.39.1",
+    "@eslint/eslintrc": "^3.3.3",
+    "@eslint/js": "^9.39.2",
     "@jest/test-sequencer": "^30.2.0",
     "@types/jest": "^30.0.0",
-    "@types/node": "^24.10.1",
-    "@typescript-eslint/eslint-plugin": "^8.48.0",
-    "@typescript-eslint/parser": "^8.48.0",
-    "eslint": "^9.39.1",
+    "@types/node": "^25.0.9",
+    "@typescript-eslint/eslint-plugin": "^8.53.1",
+    "@typescript-eslint/parser": "^8.53.1",
+    "eslint": "^9.39.2",
     "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-prettier": "^5.5.4",
-    "globals": "^16.5.0",
+    "eslint-plugin-prettier": "^5.5.5",
+    "globals": "^17.0.0",
     "jest": "^30.2.0",
-    "prettier": "^3.7.1",
+    "prettier": "^3.8.0",
     "rimraf": "^6.1.2",
-    "ts-jest": "^29.4.5",
-    "tsx": "^4.20.6",
+    "ts-jest": "^29.4.6",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   },
   "peerDependencies": {

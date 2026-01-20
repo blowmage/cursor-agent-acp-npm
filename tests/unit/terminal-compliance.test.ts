@@ -279,7 +279,7 @@ describe('ACP Terminals Protocol Compliance', () => {
       expect(client.createTerminal).toHaveBeenCalledWith({
         sessionId: 'session-1',
         command: 'npm',
-        outputByteLimit: 1048576,
+        outputByteLimit: 1048576n,
       });
     });
 
@@ -373,7 +373,7 @@ describe('ACP Terminals Protocol Compliance', () => {
 
       expect(client.createTerminal).toHaveBeenCalledWith(
         expect.objectContaining({
-          outputByteLimit: 1000,
+          outputByteLimit: 1000n,
         })
       );
     });
@@ -411,7 +411,7 @@ describe('ACP Terminals Protocol Compliance', () => {
 
       expect(client.createTerminal).toHaveBeenCalledWith(
         expect.objectContaining({
-          outputByteLimit: 5000,
+          outputByteLimit: 5000n,
         })
       );
     });
@@ -447,7 +447,7 @@ describe('ACP Terminals Protocol Compliance', () => {
       expect(request.args).toEqual(['hello']);
       expect(request.cwd).toBe('/tmp');
       expect(request.env).toEqual([{ name: 'TEST', value: 'true' }]);
-      expect(request.outputByteLimit).toBe(1000);
+      expect(request.outputByteLimit).toBe(1000n);
     });
 
     it('SHOULD return TerminalHandle type from SDK', async () => {

@@ -464,7 +464,7 @@ describe('Terminal Integration Tests', () => {
 
       expect(client.createTerminal).toHaveBeenLastCalledWith(
         expect.objectContaining({
-          outputByteLimit: 8000,
+          outputByteLimit: 8000n,
         })
       );
 
@@ -476,14 +476,14 @@ describe('Terminal Integration Tests', () => {
 
       expect(client.createTerminal).toHaveBeenLastCalledWith(
         expect.objectContaining({
-          outputByteLimit: 10000, // Capped to max
+          outputByteLimit: 10000n, // Capped to max
         })
       );
 
       expect(logger.warn).toHaveBeenCalledWith(
         'Output byte limit capped to maximum',
         expect.objectContaining({
-          requested: 50000,
+          requested: '50000',
           max: 10000,
         })
       );

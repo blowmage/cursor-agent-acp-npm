@@ -315,7 +315,18 @@ export class ContentProcessor {
       value += `Type: ${block.mimeType}\n`;
     }
     if (block.size !== undefined && block.size !== null) {
-      value += `Size: ${this.formatDataSize(block.size)}\n`;
+      if (typeof block.size === 'bigint') {
+        const maxSafe = BigInt(Number.MAX_SAFE_INTEGER);
+        const minSafe = BigInt(Number.MIN_SAFE_INTEGER);
+        if (block.size <= maxSafe && block.size >= minSafe) {
+          value += `Size: ${this.formatDataSize(Number(block.size))}\n`;
+        } else {
+          // Avoid precision loss by not converting very large bigint to number
+          value += `Size: ${block.size.toString()} bytes\n`;
+        }
+      } else {
+        value += `Size: ${this.formatDataSize(block.size)}\n`;
+      }
     }
 
     return {
@@ -800,11 +811,39 @@ export class ContentProcessor {
   /**
    * Format data size for display
    */
-  private formatDataSize(bytes: number): string {
+  private formatDataSize(bytes: number | bigint): string {
     const units = ['B', 'KB', 'MB', 'GB'];
-    let size = bytes;
     let unitIndex = 0;
 
+    // Handle bigint inputs carefully to avoid precision loss when converting to number.
+    if (typeof bytes === 'bigint') {
+      const maxSafeBigInt = BigInt(Number.MAX_SAFE_INTEGER);
+
+      // If within the safe integer range, convert directly and reuse number logic.
+      if (bytes <= maxSafeBigInt) {
+        let size = Number(bytes);
+        while (size >= 1024 && unitIndex < units.length - 1) {
+          size /= 1024;
+          unitIndex++;
+        }
+        return `${size.toFixed(1)}${units[unitIndex]}`;
+      }
+
+      // For very large values, scale using bigint arithmetic until the size is small
+      // enough that conversion to number is safe and precise.
+      let sizeBig = bytes;
+      const kBig = 1024n;
+      while (sizeBig >= kBig && unitIndex < units.length - 1) {
+        sizeBig /= kBig;
+        unitIndex++;
+      }
+
+      const size = Number(sizeBig); // sizeBig < 1024n here, so this conversion is safe.
+      return `${size.toFixed(1)}${units[unitIndex]}`;
+    }
+
+    // Default path for number inputs.
+    let size = bytes;
     while (size >= 1024 && unitIndex < units.length - 1) {
       size /= 1024;
       unitIndex++;
