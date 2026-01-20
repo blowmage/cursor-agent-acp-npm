@@ -751,7 +751,7 @@ export class ContentProcessor {
       trimmed.startsWith('```') ||
       trimmed.startsWith('# File:') ||
       trimmed.startsWith('# Image:') ||
-      text.includes('[Image data:')
+      trimmed.includes('[Image data:')
     );
   }
 
