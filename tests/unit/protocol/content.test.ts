@@ -1672,6 +1672,351 @@ That should work!`;
     });
   });
 
+  describe('structural element normalization', () => {
+    describe('isStructuralElement detection', () => {
+      it('should detect code blocks starting with ```', async () => {
+        const testCases = [
+          '```javascript\ncode\n```',
+          '  ```python\ncode\n```  ',
+          '\n```\ncode\n```\n',
+          '```typescript\nconst x = 1;\n```',
+        ];
+
+        for (const text of testCases) {
+          const block = { type: 'text', text } as ContentBlock;
+          const result = await contentProcessor.processStreamChunk(block);
+          expect(result).toBeDefined();
+          expect(result?.text).toMatch(/^\n```/);
+          expect(result?.text).toMatch(/```\n$/);
+        }
+      });
+
+      it('should detect file sections starting with # File:', async () => {
+        const testCases = [
+          '# File: test.js',
+          '  # File: example.ts  ',
+          '\n# File: path/to/file.py\n',
+        ];
+
+        for (const text of testCases) {
+          const block = { type: 'text', text } as ContentBlock;
+          const result = await contentProcessor.processStreamChunk(block);
+          expect(result).toBeDefined();
+          expect(result?.text).toMatch(/^\n# File:/);
+          expect(result?.text).toMatch(/\n$/);
+        }
+      });
+
+      it('should detect image sections starting with # Image:', async () => {
+        const testCases = [
+          '# Image: test.png',
+          '  # Image: example.jpg  ',
+          '\n# Image: path/to/image.png\n',
+        ];
+
+        for (const text of testCases) {
+          const block = { type: 'text', text } as ContentBlock;
+          const result = await contentProcessor.processStreamChunk(block);
+          expect(result).toBeDefined();
+          expect(result?.text).toMatch(/^\n# Image:/);
+          expect(result?.text).toMatch(/\n$/);
+        }
+      });
+
+      it('should detect image data references', async () => {
+        const testCases = [
+          '[Image data: image/png, 1.5KB base64]',
+          '  [Image data: image/jpeg, 2.3KB base64]  ',
+          '\n[Image data: image/png, 1.0KB base64]\n',
+          'Text before [Image data: image/png, 1.5KB base64] text after',
+        ];
+
+        for (const text of testCases) {
+          const block = { type: 'text', text } as ContentBlock;
+          const result = await contentProcessor.processStreamChunk(block);
+          expect(result).toBeDefined();
+          // Should normalize if it contains image data
+          if (text.trim().includes('[Image data:')) {
+            expect(result?.text).toContain('[Image data:');
+          }
+        }
+      });
+
+      it('should not detect regular text as structural', async () => {
+        const regularTexts = [
+          'Just some regular text',
+          'Hello world!',
+          'This is not a code block',
+          'No file section here',
+          'Regular text with no special markers',
+        ];
+
+        for (const text of regularTexts) {
+          const block = { type: 'text', text } as ContentBlock;
+          const result = await contentProcessor.processStreamChunk(block);
+          expect(result).toBeDefined();
+          // Regular text should be unchanged (no normalization)
+          expect(result?.text).toBe(text);
+        }
+      });
+    });
+
+    describe('normalizeStructuralElement behavior', () => {
+      it('should add newlines to code blocks without existing newlines', async () => {
+        const codeBlock = '```javascript\nconst x = 1;\n```';
+        const block = { type: 'text', text: codeBlock } as ContentBlock;
+        const result = await contentProcessor.processStreamChunk(block);
+
+        expect(result?.text).toBe('\n```javascript\nconst x = 1;\n```\n');
+        expect(result?.text.startsWith('\n')).toBe(true);
+        expect(result?.text.endsWith('\n')).toBe(true);
+      });
+
+      it('should normalize code blocks with existing newlines (prevent double newlines)', async () => {
+        const testCases = [
+          { input: '\n```javascript\ncode\n```\n', expected: '\n```javascript\ncode\n```\n' },
+          { input: '  \n```python\ncode\n```\n  ', expected: '\n```python\ncode\n```\n' },
+          { input: '\n\n```typescript\ncode\n```\n\n', expected: '\n```typescript\ncode\n```\n' },
+        ];
+
+        for (const { input, expected } of testCases) {
+          const block = { type: 'text', text: input } as ContentBlock;
+          const result = await contentProcessor.processStreamChunk(block);
+          expect(result?.text).toBe(expected);
+          // Should have exactly one leading and one trailing newline
+          expect(result?.text.match(/^\n/)).toBeTruthy();
+          expect(result?.text.match(/\n$/)).toBeTruthy();
+          // Should not have double newlines at start/end
+          expect(result?.text).not.toMatch(/^\n\n/);
+          expect(result?.text).not.toMatch(/\n\n$/);
+        }
+      });
+
+      it('should normalize file sections with whitespace', async () => {
+        const testCases = [
+          { input: '# File: test.js', expected: '\n# File: test.js\n' },
+          { input: '  # File: example.ts  ', expected: '\n# File: example.ts\n' },
+          { input: '\n# File: path/to/file.py\n', expected: '\n# File: path/to/file.py\n' },
+        ];
+
+        for (const { input, expected } of testCases) {
+          const block = { type: 'text', text: input } as ContentBlock;
+          const result = await contentProcessor.processStreamChunk(block);
+          expect(result?.text).toBe(expected);
+        }
+      });
+
+      it('should normalize image sections with whitespace', async () => {
+        const testCases = [
+          { input: '# Image: test.png', expected: '\n# Image: test.png\n' },
+          { input: '  # Image: example.jpg  ', expected: '\n# Image: example.jpg\n' },
+        ];
+
+        for (const { input, expected } of testCases) {
+          const block = { type: 'text', text: input } as ContentBlock;
+          const result = await contentProcessor.processStreamChunk(block);
+          expect(result?.text).toBe(expected);
+        }
+      });
+
+      it('should normalize image data references', async () => {
+        const imageRef = '[Image data: image/png, 1.5KB base64]';
+        const block = { type: 'text', text: imageRef } as ContentBlock;
+        const result = await contentProcessor.processStreamChunk(block);
+
+        expect(result?.text).toBe('\n[Image data: image/png, 1.5KB base64]\n');
+      });
+
+      it('should preserve regular text unchanged', async () => {
+        const regularTexts = [
+          'Just some text',
+          'Text with\nnewlines',
+          'Text with   spaces',
+          'Text ending with newline\n',
+        ];
+
+        for (const text of regularTexts) {
+          const block = { type: 'text', text } as ContentBlock;
+          const result = await contentProcessor.processStreamChunk(block);
+          expect(result?.text).toBe(text);
+        }
+      });
+
+      it('should handle empty strings', async () => {
+        const block = { type: 'text', text: '' } as ContentBlock;
+        const result = await contentProcessor.processStreamChunk(block);
+        expect(result?.text).toBe('');
+      });
+
+      it('should handle whitespace-only strings', async () => {
+        const whitespaceTexts = ['   ', '\n\n', '  \n  '];
+
+        for (const text of whitespaceTexts) {
+          const block = { type: 'text', text } as ContentBlock;
+          const result = await contentProcessor.processStreamChunk(block);
+          // Whitespace-only should be preserved (not structural)
+          expect(result?.text).toBe(text);
+        }
+      });
+    });
+
+    describe('processStreamChunk with ContentBlock objects', () => {
+      it('should normalize structural elements in ContentBlock objects', async () => {
+        const codeBlock = { type: 'text', text: '```js\ncode\n```' } as ContentBlock;
+        const result = await contentProcessor.processStreamChunk(codeBlock);
+
+        expect(result).toBeDefined();
+        expect(result?.type).toBe('text');
+        expect(result?.text).toBe('\n```js\ncode\n```\n');
+      });
+
+      it('should preserve non-text ContentBlocks unchanged', async () => {
+        const imageBlock = {
+          type: 'image',
+          data: 'base64data',
+          mimeType: 'image/png',
+        } as ContentBlock;
+
+        const result = await contentProcessor.processStreamChunk(imageBlock);
+
+        expect(result).toBe(imageBlock);
+      });
+
+      it('should handle ContentBlock with annotations', async () => {
+        const codeBlock = {
+          type: 'text',
+          text: '```python\nprint("test")\n```',
+          annotations: { audience: ['user'] },
+        } as ContentBlock;
+
+        const result = await contentProcessor.processStreamChunk(codeBlock);
+
+        expect(result).toBeDefined();
+        expect(result?.text).toBe('\n```python\nprint("test")\n```\n');
+        expect((result as any).annotations).toEqual({ audience: ['user'] });
+      });
+    });
+
+    describe('integration with finalizeStreaming', () => {
+      it('should normalize code blocks in finalizeStreaming', async () => {
+        contentProcessor.startStreaming();
+        await contentProcessor.processStreamChunk('```javascript\n');
+        await contentProcessor.processStreamChunk('const x = 1;\n');
+        // Don't close the code block - finalize should handle it
+        const result = contentProcessor.finalizeStreaming();
+
+        expect(result).toBeDefined();
+        expect(result?.text).toMatch(/^\n```javascript/);
+        expect(result?.text).toMatch(/```\n$/);
+        expect(result?.text).toContain('const x = 1;');
+      });
+
+      it('should normalize structural elements in remaining text', async () => {
+        contentProcessor.startStreaming();
+        // Use a string without newline so it stays in accumulatedContent
+        // (strings with newlines get returned immediately, leaving nothing for finalizeStreaming)
+        await contentProcessor.processStreamChunk('# File: test.js'); // No newline
+        const result = contentProcessor.finalizeStreaming();
+
+        expect(result).toBeDefined();
+        expect(result?.text).toBe('\n# File: test.js\n');
+      });
+
+      it('should preserve regular text in finalizeStreaming', async () => {
+        contentProcessor.startStreaming();
+        await contentProcessor.processStreamChunk('Just some regular text');
+        const result = contentProcessor.finalizeStreaming();
+
+        expect(result).toBeDefined();
+        expect(result?.text).toBe('Just some regular text');
+      });
+    });
+
+    describe('integration with parseResponse methods', () => {
+      it('should normalize code sections in parseResponse', async () => {
+        const response = '```javascript\nconst x = 1;\n```';
+        const blocks = await contentProcessor.parseResponse(response);
+
+        expect(blocks.length).toBeGreaterThan(0);
+        const codeBlock = blocks.find((b) => b.text.includes('javascript'));
+        expect(codeBlock).toBeDefined();
+        if (codeBlock) {
+          expect(codeBlock.text).toMatch(/^\n```javascript/);
+          expect(codeBlock.text).toMatch(/```\n$/);
+        }
+      });
+
+      it('should normalize file sections in parseResponse', async () => {
+        const response = '# File: test.js\n```javascript\ncode\n```';
+        const blocks = await contentProcessor.parseResponse(response);
+
+        expect(blocks.length).toBeGreaterThan(0);
+        const fileBlock = blocks.find((b) => b.text.includes('# File:'));
+        expect(fileBlock).toBeDefined();
+        if (fileBlock) {
+          expect(fileBlock.text).toMatch(/^\n# File:/);
+          expect(fileBlock.text).toMatch(/\n$/);
+        }
+      });
+
+      it('should normalize image sections in parseResponse', async () => {
+        const response = '# Image: test.png\n[Image data: image/png, 1.5KB base64]';
+        const blocks = await contentProcessor.parseResponse(response);
+
+        expect(blocks.length).toBeGreaterThan(0);
+        const imageBlock = blocks.find((b) => b.text.includes('# Image:'));
+        expect(imageBlock).toBeDefined();
+        if (imageBlock) {
+          expect(imageBlock.text).toMatch(/^\n# Image:/);
+          expect(imageBlock.text).toMatch(/\n$/);
+        }
+      });
+    });
+
+    describe('edge cases and double newline prevention', () => {
+      it('should prevent double newlines when normalizing already-normalized content', async () => {
+        const alreadyNormalized = '\n```javascript\ncode\n```\n';
+        const block = { type: 'text', text: alreadyNormalized } as ContentBlock;
+        const result = await contentProcessor.processStreamChunk(block);
+
+        // Should still be normalized (trim + add newlines), not double-normalized
+        expect(result?.text).toBe('\n```javascript\ncode\n```\n');
+        expect(result?.text).not.toMatch(/^\n\n/);
+        expect(result?.text).not.toMatch(/\n\n$/);
+      });
+
+      it('should handle code blocks with excessive whitespace', async () => {
+        const withExcessiveWhitespace = '   \n\n```python\ncode\n```\n\n   ';
+        const block = { type: 'text', text: withExcessiveWhitespace } as ContentBlock;
+        const result = await contentProcessor.processStreamChunk(block);
+
+        expect(result?.text).toBe('\n```python\ncode\n```\n');
+        // Should have exactly one leading and one trailing newline
+        const leadingNewlines = result?.text.match(/^\n+/)?.[0].length || 0;
+        const trailingNewlines = result?.text.match(/\n+$/)?.[0].length || 0;
+        expect(leadingNewlines).toBe(1);
+        expect(trailingNewlines).toBe(1);
+      });
+
+      it('should handle mixed structural and regular text in streaming', async () => {
+        contentProcessor.startStreaming();
+
+        // Regular text
+        const text1 = await contentProcessor.processStreamChunk('Some text\n');
+        expect(text1?.text).toBe('Some text\n');
+
+        // Code block
+        const codeBlock = { type: 'text', text: '```js\ncode\n```' } as ContentBlock;
+        const code1 = await contentProcessor.processStreamChunk(codeBlock);
+        expect(code1?.text).toBe('\n```js\ncode\n```\n');
+
+        // More regular text
+        const text2 = await contentProcessor.processStreamChunk('More text\n');
+        expect(text2?.text).toBe('More text\n');
+      });
+    });
+  });
+
   describe('getContentStats with all block types', () => {
     it('should calculate stats for all content types', () => {
       const blocks: ContentBlock[] = [
