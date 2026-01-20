@@ -1723,22 +1723,53 @@ That should work!`;
         }
       });
 
-      it('should detect image data references', async () => {
-        const testCases = [
-          '[Image data: image/png, 1.5KB base64]',
-          '  [Image data: image/jpeg, 2.3KB base64]  ',
-          '\n[Image data: image/png, 1.0KB base64]\n',
-          'Text before [Image data: image/png, 1.5KB base64] text after',
+      it('should detect and normalize standalone image data references', async () => {
+        // Standalone image references should be normalized (get newlines added)
+        const standaloneCases = [
+          {
+            input: '[Image data: image/png, 1.5KB base64]',
+            expected: '\n[Image data: image/png, 1.5KB base64]\n',
+          },
+          {
+            input: '  [Image data: image/jpeg, 2.3KB base64]  ',
+            expected: '\n[Image data: image/jpeg, 2.3KB base64]\n',
+          },
+          {
+            input: '\n[Image data: image/png, 1.0KB base64]\n',
+            expected: '\n[Image data: image/png, 1.0KB base64]\n',
+          },
         ];
 
-        for (const text of testCases) {
+        for (const { input, expected } of standaloneCases) {
+          const block = { type: 'text', text: input } as ContentBlock;
+          const result = await contentProcessor.processStreamChunk(block);
+          expect(result).toBeDefined();
+          expect(result?.text).toBe(expected);
+          // Should have exactly one leading and one trailing newline
+          expect(result?.text).toMatch(/^\n\[Image data:/);
+          expect(result?.text).toMatch(/\]\n$/);
+        }
+      });
+
+      it('should not normalize regular text containing image data references', async () => {
+        // Regular text containing image references should NOT be normalized
+        const embeddedCases = [
+          'Text before [Image data: image/png, 1.5KB base64] text after',
+          'Check out this [Image data: image/png, 1.5KB base64] screenshot!',
+          'The image [Image data: image/jpeg, 2.3KB base64] is embedded here.',
+        ];
+
+        for (const text of embeddedCases) {
           const block = { type: 'text', text } as ContentBlock;
           const result = await contentProcessor.processStreamChunk(block);
           expect(result).toBeDefined();
-          // Should normalize if it contains image data
-          if (text.trim().includes('[Image data:')) {
-            expect(result?.text).toContain('[Image data:');
-          }
+          // Regular text should remain unchanged (no normalization)
+          expect(result?.text).toBe(text);
+          // Should NOT have newlines added around it
+          expect(result?.text).not.toMatch(/^\n/);
+          expect(result?.text).not.toMatch(/\n$/);
+          // Should still contain the image reference
+          expect(result?.text).toContain('[Image data:');
         }
       });
 

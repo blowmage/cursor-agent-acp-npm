@@ -747,6 +747,10 @@ export class ContentProcessor {
   /**
    * Check if text represents a structural element that needs newline separation
    * Structural elements include code blocks, file sections, and image references
+   *
+   * Note: For image data references, we only match if the text IS an image
+   * reference (starts with it), not if it merely contains one. This prevents
+   * incorrectly normalizing regular text that mentions image data.
    */
   private isStructuralElement(text: string): boolean {
     const trimmed = text.trim();
@@ -754,7 +758,7 @@ export class ContentProcessor {
       trimmed.startsWith('```') ||
       trimmed.startsWith('# File:') ||
       trimmed.startsWith('# Image:') ||
-      trimmed.includes('[Image data:')
+      trimmed.startsWith('[Image data:')
     );
   }
 
