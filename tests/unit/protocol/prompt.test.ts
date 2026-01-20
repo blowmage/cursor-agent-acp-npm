@@ -2,6 +2,7 @@
  * Unit tests for PromptHandler
  */
 
+import { jest } from '@jest/globals';
 import { PromptHandler } from '../../../src/protocol/prompt';
 import { ContentProcessor } from '../../../src/protocol/content';
 import { SlashCommandsRegistry } from '../../../src/tools/slash-commands';

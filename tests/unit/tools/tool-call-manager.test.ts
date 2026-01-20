@@ -4,6 +4,7 @@
  * Tests tool call tracking, reporting, and lifecycle management.
  */
 
+import { jest } from '@jest/globals';
 import { ToolCallManager } from '../../../src/tools/tool-call-manager';
 import type {
   Logger,

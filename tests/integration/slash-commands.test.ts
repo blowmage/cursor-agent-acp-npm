@@ -11,6 +11,7 @@
  * Per ACP spec: https://agentclientprotocol.com/protocol/slash-commands
  */
 
+import { jest } from '@jest/globals';
 import { CursorAgentAdapter } from '../../src/adapter/cursor-agent-adapter';
 import { SlashCommandsRegistry } from '../../src/tools/slash-commands';
 import type { AdapterConfig, Logger } from '../../src/types';
@@ -18,14 +19,12 @@ import type {
   NewSessionResponse,
   AvailableCommand,
 } from '@agentclientprotocol/sdk';
+import { MockCursorCliBridge } from './mocks/cursor-bridge-mock';
 
 // Mock the CursorCliBridge module
 jest.mock('../../src/cursor/cli-bridge', () => ({
   CursorCliBridge: jest.fn().mockImplementation((config, logger) => {
-    return new (require('./mocks/cursor-bridge-mock').MockCursorCliBridge)(
-      config,
-      logger
-    );
+    return new MockCursorCliBridge(config, logger);
   }),
 }));
 

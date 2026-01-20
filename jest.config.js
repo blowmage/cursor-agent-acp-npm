@@ -1,6 +1,7 @@
 module.exports = {
-  preset: 'ts-jest',
+  preset: 'ts-jest/presets/default-esm',
   testEnvironment: 'node',
+  extensionsToTreatAsEsm: ['.ts'],
   testMatch: ['**/tests/unit/**/*.test.ts', '**/tests/unit/**/*.spec.ts'],
   testPathIgnorePatterns: ['/node_modules/', '/dist/', '/tests/integration/', '/tests/fixtures/'],
 
@@ -25,8 +26,9 @@ module.exports = {
   // globalTeardown: '<rootDir>/tests/teardown.js', // Disabled for unit tests
 
   transform: {
-    '^.+\\.tsx?$': ['ts-jest', { 
+    '^.+\\.tsx?$': ['ts-jest', {
       tsconfig: 'tsconfig.json',
+      useESM: true,
     }],
     '^.+\\.m?js$': ['ts-jest', {
       tsconfig: {

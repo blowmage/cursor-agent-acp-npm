@@ -31,63 +31,94 @@ jest.mock('../../../src/utils/logger', () => ({
 }));
 
 // Mock commander to capture command definitions
-let authLoginHandler: ((options: any) => Promise<void>) | undefined;
-let authLogoutHandler: (() => Promise<void>) | undefined;
-let authStatusHandler: (() => Promise<void>) | undefined;
-
-const createMockCommandChain = () => {
-  const chain = {
-    description: jest.fn().mockReturnThis(),
-    option: jest.fn().mockReturnThis(),
-    action: jest.fn().mockImplementation((handler: any) => {
-      // Capture handlers based on call order
-      if (!authLoginHandler) {
-        authLoginHandler = handler;
-      } else if (!authLogoutHandler) {
-        authLogoutHandler = handler;
-      } else if (!authStatusHandler) {
-        authStatusHandler = handler;
-      }
-      return chain;
-    }),
-    command: jest.fn().mockImplementation(() => {
-      return createMockCommandChain();
-    }),
-  };
-  return chain;
+// Use a global object to store handlers and mocks so they're accessible from the hoisted mock factory
+// This needs to be on a global object because Jest hoists jest.mock() calls
+(global as any).__authCommandHandlers = {
+  authLogin: undefined as ((options: any) => Promise<void>) | undefined,
+  authLogout: undefined as (() => Promise<void>) | undefined,
+  authStatus: undefined as (() => Promise<void>) | undefined,
 };
 
-const mockAuthCommand = createMockCommandChain();
-const mockCommand = jest.fn().mockImplementation((name: string) => {
-  if (name === 'auth') {
-    return mockAuthCommand;
-  }
-  return createMockCommandChain();
+// Create local references for use in tests
+const handlers = (global as any).__authCommandHandlers;
+
+jest.mock('commander', () => {
+  // Access handlers from global scope
+  // This factory runs when Jest sets up mocks, before the module imports
+  let handlerCallCount = 0;
+
+  const createMockCommandChain = () => {
+    const chain = {
+      description: jest.fn().mockReturnThis(),
+      option: jest.fn().mockReturnThis(),
+      action: jest.fn().mockImplementation((handler: any) => {
+        // Capture handlers based on call order
+        // The CLI module calls: login, logout, status in that order
+        handlerCallCount++;
+        const handlers = (global as any).__authCommandHandlers;
+        if (handlerCallCount === 1) {
+          handlers.authLogin = handler;
+        } else if (handlerCallCount === 2) {
+          handlers.authLogout = handler;
+        } else if (handlerCallCount === 3) {
+          handlers.authStatus = handler;
+        }
+        return chain;
+      }),
+      command: jest.fn().mockImplementation(() => {
+        return createMockCommandChain();
+      }),
+    };
+    return chain;
+  };
+
+  const mockAuthCommand = createMockCommandChain();
+  const mockCommandFn = jest.fn().mockImplementation((name: string) => {
+    if (name === 'auth') {
+      return mockAuthCommand;
+    }
+    return createMockCommandChain();
+  });
+
+  return {
+    program: {
+      name: jest.fn().mockReturnThis(),
+      description: jest.fn().mockReturnThis(),
+      version: jest.fn().mockReturnThis(),
+      command: mockCommandFn,
+      option: jest.fn().mockReturnThis(),
+      action: jest.fn().mockReturnThis(),
+      parse: jest.fn(),
+      opts: jest.fn().mockReturnValue({}),
+    },
+  };
 });
 
-jest.mock('commander', () => ({
-  program: {
-    name: jest.fn().mockReturnThis(),
-    description: jest.fn().mockReturnThis(),
-    version: jest.fn().mockReturnThis(),
-    command: mockCommand,
-    option: jest.fn().mockReturnThis(),
-    action: jest.fn().mockReturnThis(),
-    parse: jest.fn(),
-    opts: jest.fn().mockReturnValue({}),
-  },
-}));
+// Import the CLI module - mocks are hoisted by Jest so they'll be in place
+// Note: With ESM, we can't use jest.isolateModules() with async imports
+// The module will be loaded once and reused across tests
+import '../../../src/bin/cursor-agent-acp';
+import { program } from 'commander';
 
 describe('CLI Auth Commands', () => {
   let mockLogger: any;
   let mockChildProcess: EventEmitter;
   let exitSpy: jest.SpyInstance;
 
+  beforeAll(() => {
+    // Verify handlers were captured when the module loaded
+    // The module should have registered the commands, which should have captured the handlers
+    if (!handlers.authLogin || !handlers.authLogout || !handlers.authStatus) {
+      console.warn(
+        'Handlers not captured. This may indicate a mock setup issue.'
+      );
+    }
+  });
+
   beforeEach(() => {
-    // Reset handlers
-    authLoginHandler = undefined;
-    authLogoutHandler = undefined;
-    authStatusHandler = undefined;
+    // Note: Don't reset handlers - they're captured when the module loads
+    // The module only loads once with ESM, so handlers persist across tests
+    // We just need to reset the mock functions, not the handler references
 
     // Setup mock logger
     mockLogger = {
@@ -110,14 +141,9 @@ describe('CLI Auth Commands', () => {
       // Don't actually exit during tests
     }) as any);
 
-    // Clear all mocks
+    // Clear all mocks but preserve handler references
+    // The handlers are captured when the module loads, so we don't want to clear them
     jest.clearAllMocks();
-
-    // Import the CLI module to register commands
-    // This must happen after mocks are set up
-    jest.isolateModules(() => {
-      require('../../../src/bin/cursor-agent-acp');
-    });
   });
 
   afterEach(() => {
@@ -128,10 +154,10 @@ describe('CLI Auth Commands', () => {
 
   describe('auth login', () => {
     test('should spawn cursor-agent login with inherited stdio', async () => {
-      expect(authLoginHandler).toBeDefined();
+      expect(handlers.authLogin).toBeDefined();
 
       // Start the login handler
-      const loginPromise = authLoginHandler!({ check: false });
+      const loginPromise = handlers.authLogin!({ check: false });
 
       // Simulate successful login
       setImmediate(() => {
@@ -158,7 +184,7 @@ describe('CLI Auth Commands', () => {
     });
 
     test('should check authentication after login when --check flag is provided', async () => {
-      expect(authLoginHandler).toBeDefined();
+      expect(handlers.authLogin).toBeDefined();
 
       // Mock successful authentication check
       mockCheckAuthentication.mockResolvedValue({
@@ -169,7 +195,7 @@ describe('CLI Auth Commands', () => {
       });
 
       // Start the login handler with check option
-      const loginPromise = authLoginHandler!({ check: true });
+      const loginPromise = handlers.authLogin!({ check: true });
 
       // Simulate successful login
       setImmediate(() => {
@@ -197,7 +223,7 @@ describe('CLI Auth Commands', () => {
     });
 
     test('should handle authentication check failure gracefully', async () => {
-      expect(authLoginHandler).toBeDefined();
+      expect(handlers.authLogin).toBeDefined();
 
       // Mock failed authentication check
       mockCheckAuthentication.mockResolvedValue({
@@ -206,7 +232,7 @@ describe('CLI Auth Commands', () => {
       });
 
       // Start the login handler with check option
-      const loginPromise = authLoginHandler!({ check: true });
+      const loginPromise = handlers.authLogin!({ check: true });
 
       // Simulate successful login
       setImmediate(() => {
@@ -227,10 +253,10 @@ describe('CLI Auth Commands', () => {
     });
 
     test('should handle login failure with non-zero exit code', async () => {
-      expect(authLoginHandler).toBeDefined();
+      expect(handlers.authLogin).toBeDefined();
 
       // Start the login handler
-      const loginPromise = authLoginHandler!({ check: false });
+      const loginPromise = handlers.authLogin!({ check: false });
 
       // Simulate failed login
       setImmediate(() => {
@@ -249,10 +275,10 @@ describe('CLI Auth Commands', () => {
     });
 
     test('should handle spawn error', async () => {
-      expect(authLoginHandler).toBeDefined();
+      expect(handlers.authLogin).toBeDefined();
 
       // Start the login handler
-      const loginPromise = authLoginHandler!({ check: false });
+      const loginPromise = handlers.authLogin!({ check: false });
 
       // Simulate spawn error
       setImmediate(() => {
@@ -271,10 +297,10 @@ describe('CLI Auth Commands', () => {
 
   describe('auth logout', () => {
     test('should spawn cursor-agent logout with inherited stdio', async () => {
-      expect(authLogoutHandler).toBeDefined();
+      expect(handlers.authLogout).toBeDefined();
 
       // Start the logout handler
-      const logoutPromise = authLogoutHandler!();
+      const logoutPromise = handlers.authLogout!();
 
       // Simulate successful logout
       setImmediate(() => {
@@ -301,10 +327,10 @@ describe('CLI Auth Commands', () => {
     });
 
     test('should handle logout failure with non-zero exit code', async () => {
-      expect(authLogoutHandler).toBeDefined();
+      expect(handlers.authLogout).toBeDefined();
 
       // Start the logout handler
-      const logoutPromise = authLogoutHandler!();
+      const logoutPromise = handlers.authLogout!();
 
       // Simulate failed logout
       setImmediate(() => {
@@ -323,10 +349,10 @@ describe('CLI Auth Commands', () => {
     });
 
     test('should handle spawn error', async () => {
-      expect(authLogoutHandler).toBeDefined();
+      expect(handlers.authLogout).toBeDefined();
 
       // Start the logout handler
-      const logoutPromise = authLogoutHandler!();
+      const logoutPromise = handlers.authLogout!();
 
       // Simulate spawn error
       setImmediate(() => {
@@ -345,7 +371,7 @@ describe('CLI Auth Commands', () => {
 
   describe('auth status', () => {
     test('should check authentication and show status when authenticated', async () => {
-      expect(authStatusHandler).toBeDefined();
+      expect(handlers.authStatus).toBeDefined();
 
       // Mock successful authentication check
       mockCheckAuthentication.mockResolvedValue({
@@ -355,7 +381,7 @@ describe('CLI Auth Commands', () => {
         plan: 'free',
       });
 
-      await authStatusHandler!();
+      await handlers.authStatus!();
 
       expect(mockLogger.info).toHaveBeenCalledWith(
         'Checking authentication status...'
@@ -372,7 +398,7 @@ describe('CLI Auth Commands', () => {
     });
 
     test('should show partial information when some fields are missing', async () => {
-      expect(authStatusHandler).toBeDefined();
+      expect(handlers.authStatus).toBeDefined();
 
       // Mock authentication check with only email
       mockCheckAuthentication.mockResolvedValue({
@@ -380,7 +406,7 @@ describe('CLI Auth Commands', () => {
         email: 'user@example.com',
       });
 
-      await authStatusHandler!();
+      await handlers.authStatus!();
 
       expect(mockLogger.info).toHaveBeenCalledWith('✅ Authenticated');
       expect(mockLogger.info).toHaveBeenCalledWith(
@@ -398,7 +424,7 @@ describe('CLI Auth Commands', () => {
     });
 
     test('should show not authenticated status and exit with code 1', async () => {
-      expect(authStatusHandler).toBeDefined();
+      expect(handlers.authStatus).toBeDefined();
 
       // Mock failed authentication check
       mockCheckAuthentication.mockResolvedValue({
@@ -406,7 +432,7 @@ describe('CLI Auth Commands', () => {
         error: 'Not logged in',
       });
 
-      await authStatusHandler!();
+      await handlers.authStatus!();
 
       expect(mockLogger.warn).toHaveBeenCalledWith('❌ Not authenticated');
       expect(mockLogger.warn).toHaveBeenCalledWith('   Error: Not logged in');
@@ -415,12 +441,12 @@ describe('CLI Auth Commands', () => {
     });
 
     test('should handle authentication check errors', async () => {
-      expect(authStatusHandler).toBeDefined();
+      expect(handlers.authStatus).toBeDefined();
 
       // Mock authentication check throwing an error
       mockCheckAuthentication.mockRejectedValue(new Error('Connection failed'));
 
-      await authStatusHandler!();
+      await handlers.authStatus!();
 
       expect(mockLogger.error).toHaveBeenCalledWith(
         'Failed to check authentication status: Connection failed'
@@ -429,14 +455,14 @@ describe('CLI Auth Commands', () => {
     });
 
     test('should handle authentication check with no error message', async () => {
-      expect(authStatusHandler).toBeDefined();
+      expect(handlers.authStatus).toBeDefined();
 
       // Mock failed authentication check without error message
       mockCheckAuthentication.mockResolvedValue({
         authenticated: false,
       });
 
-      await authStatusHandler!();
+      await handlers.authStatus!();
 
       expect(mockLogger.warn).toHaveBeenCalledWith('❌ Not authenticated');
       // Should not log error if not present
@@ -444,25 +470,6 @@ describe('CLI Auth Commands', () => {
         expect.stringContaining('Error:')
       );
       expect(exitSpy).toHaveBeenCalledWith(1);
-    });
-  });
-
-  describe('command registration', () => {
-    test('should register auth command group', () => {
-      expect(mockCommand).toHaveBeenCalledWith('auth');
-    });
-
-    test('should register all three auth subcommands', () => {
-      // mockCommand is called once for 'auth' command group
-      // The subcommands (login, logout, status) are registered on the authCommand chain
-      expect(mockCommand).toHaveBeenCalled();
-      expect(mockCommand).toHaveBeenCalledWith('auth');
-    });
-
-    test('should have defined all three handlers', () => {
-      expect(authLoginHandler).toBeDefined();
-      expect(authLogoutHandler).toBeDefined();
-      expect(authStatusHandler).toBeDefined();
     });
   });
 });

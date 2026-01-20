@@ -5,10 +5,12 @@
  * and project management functionality.
  */
 
+import { jest } from '@jest/globals';
 import { CursorToolsProvider } from '../../../src/tools/cursor-tools';
 import { CursorCliBridge } from '../../../src/cursor/cli-bridge';
 import type { AdapterConfig, Logger } from '../../../src/types';
 import { ToolError } from '../../../src/types';
+import fs from 'fs/promises';
 
 // Mock the CursorCliBridge to prevent real cursor-agent calls
 jest.mock('../../../src/cursor/cli-bridge', () => {
@@ -421,7 +423,6 @@ src/file2.ts:25:1:const test = () => {`,
       mockCliBridge.executeCommand.mockResolvedValue(mockResult);
 
       // Mock fs.writeFile and fs.unlink
-      const fs = require('fs/promises');
       jest.spyOn(fs, 'writeFile').mockResolvedValue(undefined);
       jest.spyOn(fs, 'unlink').mockResolvedValue(undefined);
 

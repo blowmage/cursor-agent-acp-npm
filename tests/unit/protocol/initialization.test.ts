@@ -5,6 +5,7 @@
  * protocol version validation, and error handling.
  */
 
+import { jest } from '@jest/globals';
 import { InitializationHandler } from '../../../src/protocol/initialization';
 import { createLogger } from '../../../src/utils/logger';
 import { DEFAULT_CONFIG } from '../../../src';

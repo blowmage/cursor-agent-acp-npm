@@ -2,6 +2,7 @@
  * Unit tests for ContentProcessor
  */
 
+import { jest } from '@jest/globals';
 import { ContentProcessor } from '../../../src/protocol/content';
 import type { ContentBlock } from '@agentclientprotocol/sdk';
 import {

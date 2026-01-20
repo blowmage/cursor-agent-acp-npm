@@ -12,6 +12,7 @@
  * - Stream lifecycle management
  */
 
+import { jest } from '@jest/globals';
 import { CursorAgentAdapter } from '../../src/adapter/cursor-agent-adapter';
 import { createLogger } from '../../src/utils/logger';
 import type { AdapterConfig, Logger } from '../../src/types';

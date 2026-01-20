@@ -5,6 +5,7 @@
  * notifications, queueing, and all prompt turn edge cases.
  */
 
+import { jest } from '@jest/globals';
 import { CursorAgentAdapter } from '../../src/adapter/cursor-agent-adapter';
 import type {
   AcpRequest,
@@ -13,14 +14,12 @@ import type {
   Logger,
   AcpNotification,
 } from '../../src/types';
+import { MockCursorCliBridge } from './mocks/cursor-bridge-mock';
 
 // Mock the CursorCliBridge module so adapter uses mock instead of real CLI
 jest.mock('../../src/cursor/cli-bridge', () => ({
   CursorCliBridge: jest.fn().mockImplementation((config, logger) => {
-    return new (require('./mocks/cursor-bridge-mock').MockCursorCliBridge)(
-      config,
-      logger
-    );
+    return new MockCursorCliBridge(config, logger);
   }),
 }));
 

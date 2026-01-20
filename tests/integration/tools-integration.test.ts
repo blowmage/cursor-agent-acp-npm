@@ -8,6 +8,7 @@
  * while still testing all other component integrations.
  */
 
+import { jest } from '@jest/globals';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -16,14 +17,12 @@ import { FilesystemToolProvider } from '../../src/tools/filesystem';
 import { AcpFileSystemClient } from '../../src/client/filesystem-client';
 import type { AdapterConfig, Logger, ToolCall } from '../../src/types';
 import type { ClientCapabilities } from '@agentclientprotocol/sdk';
+import { MockCursorCliBridge } from './mocks/cursor-bridge-mock';
 
 // Mock the CursorCliBridge module to avoid real cursor-agent calls
 jest.mock('../../src/cursor/cli-bridge', () => ({
   CursorCliBridge: jest.fn().mockImplementation((config, logger) => {
-    return new (require('./mocks/cursor-bridge-mock').MockCursorCliBridge)(
-      config,
-      logger
-    );
+    return new MockCursorCliBridge(config, logger);
   }),
 }));
 

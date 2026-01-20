@@ -6,6 +6,7 @@
  * Per ACP spec: https://agentclientprotocol.com/protocol/extensibility
  */
 
+import { jest } from '@jest/globals';
 import { CursorAgentAdapter } from '../../src/adapter/cursor-agent-adapter';
 import type { AdapterConfig, Logger } from '../../src/types';
 import type {

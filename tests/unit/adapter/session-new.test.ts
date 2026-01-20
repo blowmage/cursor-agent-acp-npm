@@ -5,6 +5,7 @@
  * for the session/new method per ACP specification.
  */
 
+import { jest } from '@jest/globals';
 import { CursorAgentAdapter } from '../../../src/adapter/cursor-agent-adapter';
 import type {
   AdapterConfig,

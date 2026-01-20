@@ -11,6 +11,7 @@
  * Per ACP spec: https://agentclientprotocol.com/protocol/session-modes
  */
 
+import { jest } from '@jest/globals';
 import { CursorAgentAdapter } from '../../src/adapter/cursor-agent-adapter';
 import type { AdapterConfig, Logger } from '../../src/types';
 import type {
@@ -25,14 +26,12 @@ import type {
 import { FilesystemToolProvider } from '../../src/tools/filesystem';
 import { AcpFileSystemClient } from '../../src/client/filesystem-client';
 import { promises as fs } from 'fs';
+import { MockCursorCliBridge } from './mocks/cursor-bridge-mock';
 
 // Mock the CursorCliBridge module
 jest.mock('../../src/cursor/cli-bridge', () => ({
   CursorCliBridge: jest.fn().mockImplementation((config, logger) => {
-    return new (require('./mocks/cursor-bridge-mock').MockCursorCliBridge)(
-      config,
-      logger
-    );
+    return new MockCursorCliBridge(config, logger);
   }),
 }));
 
