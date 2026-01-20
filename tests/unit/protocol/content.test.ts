@@ -1774,9 +1774,18 @@ That should work!`;
 
       it('should normalize code blocks with existing newlines (prevent double newlines)', async () => {
         const testCases = [
-          { input: '\n```javascript\ncode\n```\n', expected: '\n```javascript\ncode\n```\n' },
-          { input: '  \n```python\ncode\n```\n  ', expected: '\n```python\ncode\n```\n' },
-          { input: '\n\n```typescript\ncode\n```\n\n', expected: '\n```typescript\ncode\n```\n' },
+          {
+            input: '\n```javascript\ncode\n```\n',
+            expected: '\n```javascript\ncode\n```\n',
+          },
+          {
+            input: '  \n```python\ncode\n```\n  ',
+            expected: '\n```python\ncode\n```\n',
+          },
+          {
+            input: '\n\n```typescript\ncode\n```\n\n',
+            expected: '\n```typescript\ncode\n```\n',
+          },
         ];
 
         for (const { input, expected } of testCases) {
@@ -1795,8 +1804,14 @@ That should work!`;
       it('should normalize file sections with whitespace', async () => {
         const testCases = [
           { input: '# File: test.js', expected: '\n# File: test.js\n' },
-          { input: '  # File: example.ts  ', expected: '\n# File: example.ts\n' },
-          { input: '\n# File: path/to/file.py\n', expected: '\n# File: path/to/file.py\n' },
+          {
+            input: '  # File: example.ts  ',
+            expected: '\n# File: example.ts\n',
+          },
+          {
+            input: '\n# File: path/to/file.py\n',
+            expected: '\n# File: path/to/file.py\n',
+          },
         ];
 
         for (const { input, expected } of testCases) {
@@ -1809,7 +1824,10 @@ That should work!`;
       it('should normalize image sections with whitespace', async () => {
         const testCases = [
           { input: '# Image: test.png', expected: '\n# Image: test.png\n' },
-          { input: '  # Image: example.jpg  ', expected: '\n# Image: example.jpg\n' },
+          {
+            input: '  # Image: example.jpg  ',
+            expected: '\n# Image: example.jpg\n',
+          },
         ];
 
         for (const { input, expected } of testCases) {
@@ -1862,7 +1880,10 @@ That should work!`;
 
     describe('processStreamChunk with ContentBlock objects', () => {
       it('should normalize structural elements in ContentBlock objects', async () => {
-        const codeBlock = { type: 'text', text: '```js\ncode\n```' } as ContentBlock;
+        const codeBlock = {
+          type: 'text',
+          text: '```js\ncode\n```',
+        } as ContentBlock;
         const result = await contentProcessor.processStreamChunk(codeBlock);
 
         expect(result).toBeDefined();
@@ -1960,7 +1981,8 @@ That should work!`;
       });
 
       it('should normalize image sections in parseResponse', async () => {
-        const response = '# Image: test.png\n[Image data: image/png, 1.5KB base64]';
+        const response =
+          '# Image: test.png\n[Image data: image/png, 1.5KB base64]';
         const blocks = await contentProcessor.parseResponse(response);
 
         expect(blocks.length).toBeGreaterThan(0);
@@ -1987,7 +2009,10 @@ That should work!`;
 
       it('should handle code blocks with excessive whitespace', async () => {
         const withExcessiveWhitespace = '   \n\n```python\ncode\n```\n\n   ';
-        const block = { type: 'text', text: withExcessiveWhitespace } as ContentBlock;
+        const block = {
+          type: 'text',
+          text: withExcessiveWhitespace,
+        } as ContentBlock;
         const result = await contentProcessor.processStreamChunk(block);
 
         expect(result?.text).toBe('\n```python\ncode\n```\n');
@@ -2006,7 +2031,10 @@ That should work!`;
         expect(text1?.text).toBe('Some text\n');
 
         // Code block
-        const codeBlock = { type: 'text', text: '```js\ncode\n```' } as ContentBlock;
+        const codeBlock = {
+          type: 'text',
+          text: '```js\ncode\n```',
+        } as ContentBlock;
         const code1 = await contentProcessor.processStreamChunk(codeBlock);
         expect(code1?.text).toBe('\n```js\ncode\n```\n');
 
