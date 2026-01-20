@@ -399,16 +399,18 @@ export class ContentProcessor {
     // If we're in a code block but it wasn't closed, treat remaining as code
     if (state.inCodeBlock && state.accumulatedContent.trim()) {
       const language = state.codeLanguage || '';
-      // Add leading and trailing newlines for code block separation
+      const codeBlockText = `\`\`\`${language}\n${state.accumulatedContent}\n\`\`\``;
+      // Normalize to ensure consistent newline handling
       result = {
         type: 'text',
-        text: `\n\`\`\`${language}\n${state.accumulatedContent}\n\`\`\`\n`,
+        text: this.normalizeStructuralElement(codeBlockText),
       };
     } else if (state.accumulatedContent.trim()) {
-      // Flush any remaining text as-is for natural concatenation
+      // Flush any remaining text - normalize if it's a structural element
+      const text = state.accumulatedContent;
       result = {
         type: 'text',
-        text: state.accumulatedContent,
+        text: this.normalizeStructuralElement(text),
       };
     }
 
@@ -422,32 +424,14 @@ export class ContentProcessor {
    */
   async processStreamChunk(chunkData: any): Promise<ContentBlock | null> {
     // If chunkData is already a ContentBlock object (from cursor-agent --output-format stream-json)
-    // Check if it needs newline wrapping for structural elements
+    // Normalize structural elements for consistent newline handling
     if (chunkData && typeof chunkData === 'object' && chunkData.type) {
       if (chunkData.type === 'text' && chunkData.text) {
-        const text = chunkData.text;
-        // Check if this is a structural element (code block, file, image) that needs newline separation
-        const trimmed = text.trim();
-        if (
-          trimmed.startsWith('```') ||
-          trimmed.startsWith('# File:') ||
-          trimmed.startsWith('# Image:') ||
-          text.includes('[Image data:')
-        ) {
-          // Structural element: ensure leading and trailing newlines
-          const hasLeadingNewline = text.startsWith('\n');
-          const hasTrailingNewline = text.endsWith('\n');
-          const wrappedText =
-            (hasLeadingNewline ? '' : '\n') +
-            text +
-            (hasTrailingNewline ? '' : '\n');
-          return {
-            ...chunkData,
-            text: wrappedText,
-          };
-        }
-        // Regular text: return as-is to allow seamless concatenation
-        return chunkData as ContentBlock;
+        const normalizedText = this.normalizeStructuralElement(chunkData.text);
+        return {
+          ...chunkData,
+          text: normalizedText,
+        };
       }
       // For non-text blocks, return as-is
       return chunkData as ContentBlock;
@@ -546,10 +530,10 @@ export class ContentProcessor {
               };
             }
 
-            // Return image reference with surrounding newlines for separation
+            // Return image reference - normalize for consistent newline handling
             return {
               type: 'text',
-              text: '\n' + imageText + '\n',
+              text: this.normalizeStructuralElement(imageText),
             };
           }
         }
@@ -611,11 +595,12 @@ export class ContentProcessor {
 
           if (codeContent.length > 0 || closingIndex > 0) {
             // Complete code block found - convert to text with code formatting
-            // Add leading and trailing newlines to ensure proper separation when concatenated
             const language = state.codeLanguage || '';
+            const codeBlockText = `\`\`\`${language}\n${codeContent}\n\`\`\``;
+            // Normalize to ensure consistent newline handling
             const result: ContentBlock = {
               type: 'text',
-              text: `\n\`\`\`${language}\n${codeContent}\n\`\`\`\n`,
+              text: this.normalizeStructuralElement(codeBlockText),
             };
 
             // Reset state - remaining content will be processed in next chunk
@@ -638,10 +623,10 @@ export class ContentProcessor {
     if (accumulated.length > 100) {
       const textToReturn = accumulated;
       state.accumulatedContent = '';
-      // Return as-is to allow natural text concatenation
+      // Normalize if it's a structural element, otherwise return as-is
       return {
         type: 'text',
-        text: textToReturn,
+        text: this.normalizeStructuralElement(textToReturn),
       };
     }
 
@@ -711,7 +696,7 @@ export class ContentProcessor {
     } else if (trimmed.startsWith('# Image:')) {
       return this.parseImageSection(trimmed);
     }
-    // Regular text: return as-is to allow seamless concatenation
+    // Regular text: return as-is (not a structural element)
     return {
       type: 'text',
       text: trimmed,
@@ -720,31 +705,30 @@ export class ContentProcessor {
 
   /**
    * Parse code section - returns as text with code formatting
-   * Add leading and trailing newlines to ensure proper separation when concatenated
+   * Normalized for consistent newline handling
    */
   private parseCodeSection(section: string): ContentBlock {
-    // Return the code section with surrounding newlines
     return {
       type: 'text',
-      text: '\n' + section + '\n',
+      text: this.normalizeStructuralElement(section),
     };
   }
 
   /**
    * Parse file section
-   * Add leading and trailing newlines to ensure proper separation when concatenated
+   * Normalized for consistent newline handling
    */
   private parseFileSection(section: string): ContentBlock {
     // Return file section as text (SDK ContentBlock doesn't support custom fields)
     return {
       type: 'text',
-      text: '\n' + section + '\n',
+      text: this.normalizeStructuralElement(section),
     };
   }
 
   /**
    * Parse image section
-   * Add leading and trailing newlines to ensure proper separation when concatenated
+   * Normalized for consistent newline handling
    */
   private parseImageSection(
     section: string
@@ -753,8 +737,38 @@ export class ContentProcessor {
     // In a real implementation, you might extract base64 data
     return {
       type: 'text',
-      text: '\n' + section + '\n',
+      text: this.normalizeStructuralElement(section),
     };
+  }
+
+  /**
+   * Check if text represents a structural element that needs newline separation
+   * Structural elements include code blocks, file sections, and image references
+   */
+  private isStructuralElement(text: string): boolean {
+    const trimmed = text.trim();
+    return (
+      trimmed.startsWith('```') ||
+      trimmed.startsWith('# File:') ||
+      trimmed.startsWith('# Image:') ||
+      text.includes('[Image data:')
+    );
+  }
+
+  /**
+   * Normalize structural elements by trimming and adding consistent newlines
+   * This ensures proper separation when chunks are concatenated without creating
+   * double newlines. Regular text is returned unchanged.
+   */
+  private normalizeStructuralElement(text: string): string {
+    if (!this.isStructuralElement(text)) {
+      return text; // Regular text unchanged
+    }
+
+    // Trim to remove any existing leading/trailing whitespace/newlines
+    // Then add exactly one leading and one trailing newline
+    const trimmed = text.trim();
+    return '\n' + trimmed + '\n';
   }
 
   /**
