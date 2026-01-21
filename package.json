@@ -1,6 +1,6 @@
 {
   "name": "@blowmage/cursor-agent-acp",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Production-ready Agent Client Protocol (ACP) adapter for Cursor CLI with comprehensive tool system, security framework, and seamless AI-powered coding assistance in ACP-compliant editors like Zed",
   "main": "dist/index.js",
   "bin": {
