@@ -826,6 +826,8 @@ export class InitializationHandler {
           supportsSessionModes: true,
           // Indicate that we support session/set_mode method
           supportsSetMode: true,
+          // Indicate that we support session/set_model method (UNSTABLE)
+          supportsSetModel: true,
         },
       },
 

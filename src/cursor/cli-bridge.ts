@@ -235,6 +235,38 @@ export class CursorCliBridge {
   }
 
   /**
+   * Creates a new cursor-agent chat and returns the chat ID
+   * This is used to create a cursor-agent chat for an ACP session
+   */
+  async createChat(): Promise<string> {
+    this.logger.debug('Creating new cursor-agent chat');
+
+    try {
+      const createResponse = await this.executeCommand(['create-chat']);
+      if (!createResponse.success) {
+        throw new CursorError(`Failed to create chat: ${createResponse.error}`);
+      }
+
+      // Extract chat ID from response
+      const chatId = createResponse.stdout?.trim();
+      if (!chatId) {
+        throw new CursorError('Failed to get chat ID from cursor-agent');
+      }
+
+      this.logger.info(`Created cursor-agent chat: ${chatId}`);
+      return chatId;
+    } catch (error) {
+      this.logger.error('Failed to create cursor-agent chat', error);
+      throw error instanceof CursorError
+        ? error
+        : new CursorError(
+            `Failed to create chat: ${error instanceof Error ? error.message : String(error)}`,
+            error instanceof Error ? error : undefined
+          );
+    }
+  }
+
+  /**
    * Starts an interactive cursor-agent session
    */
   async startInteractiveSession(sessionId?: string): Promise<CursorSession> {
@@ -250,15 +282,7 @@ export class CursorCliBridge {
         chatId = sessionId;
       } else {
         // Create a new chat
-        const createResponse = await this.executeCommand(['create-chat']);
-        if (!createResponse.success) {
-          throw new CursorError(
-            `Failed to create chat: ${createResponse.error}`
-          );
-        }
-
-        // Extract chat ID from response
-        chatId = createResponse.stdout?.trim() || this.generateSessionId();
+        chatId = await this.createChat();
       }
 
       const session: CursorSession = {
@@ -561,9 +585,14 @@ export class CursorCliBridge {
           args.unshift('--model', model);
         }
 
-        // If we have a sessionId, try to resume that chat
-        if (sessionId && sessionId !== 'new') {
-          args.unshift('--resume', sessionId);
+        // Use cursor-agent chat ID if available for chat continuity
+        // The chat ID is stored in session metadata when the session is created
+        const cursorChatId = metadata?.['cursorChatId'] as string | undefined;
+        if (cursorChatId) {
+          args.unshift('--resume', cursorChatId);
+          this.logger.debug('Resuming cursor-agent chat', {
+            chatId: cursorChatId,
+          });
         }
 
         this.logger.debug('Executing cursor-agent command', {
@@ -694,9 +723,14 @@ export class CursorCliBridge {
         args.unshift('--model', model);
       }
 
-      // If we have a sessionId, try to resume that chat
-      if (sessionId && sessionId !== 'new') {
-        args.unshift('--resume', sessionId);
+      // Use cursor-agent chat ID if available for chat continuity
+      // The chat ID is stored in session metadata when the session is created
+      const cursorChatId = metadata?.['cursorChatId'] as string | undefined;
+      if (cursorChatId) {
+        args.unshift('--resume', cursorChatId);
+        this.logger.debug('Resuming cursor-agent chat (streaming)', {
+          chatId: cursorChatId,
+        });
       }
 
       let responseContent = '';

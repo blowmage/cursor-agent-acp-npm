@@ -77,6 +77,28 @@ describe('Slash Commands Integration', () => {
     });
 
     await adapter.initialize();
+
+    // Set up available models for testing
+    const sessionManager = adapter.getSessionManager();
+    if (sessionManager) {
+      sessionManager.setAvailableModels([
+        { id: 'auto', name: 'Auto', provider: 'cursor' },
+        { id: 'gpt-5', name: 'GPT-5', provider: 'openai' },
+        { id: 'sonnet-4.5', name: 'Claude 4.5 Sonnet', provider: 'anthropic' },
+      ]);
+
+      // Re-register the model command with updated models list
+      // The model command description is generated during initialization,
+      // so we need to update it after setting the models
+      const availableModels = sessionManager.getAvailableModels();
+      const modelNames = availableModels.map((m) => m.id).join(', ');
+      const registry = adapter.getSlashCommandsRegistry();
+      registry.registerCommand(
+        'model',
+        `Switch to a different model. Available: ${modelNames}`,
+        'model-id'
+      );
+    }
   });
 
   afterEach(async () => {

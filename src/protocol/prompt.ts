@@ -1245,17 +1245,22 @@ export class PromptHandler {
     const { sessionId, content, metadata } = params;
 
     try {
-      // Load session to get working directory and model
+      // Load session to get working directory, model, and cursor-agent chat ID
       const session = await this.sessionManager.loadSession(sessionId);
       const workingDir =
         (session.metadata['cwd'] as string | undefined) || process.cwd();
       const currentModel = this.sessionManager.getSessionModel(sessionId);
+      const cursorChatId = this.sessionManager.getCursorChatId(sessionId);
 
-      this.logger.debug('Processing prompt with working directory and model', {
-        sessionId,
-        cwd: workingDir,
-        model: currentModel,
-      });
+      this.logger.debug(
+        'Processing prompt with working directory, model, and chat ID',
+        {
+          sessionId,
+          cwd: workingDir,
+          model: currentModel,
+          cursorChatId,
+        }
+      );
 
       // Detect slash command in content
       // Per ACP spec: Commands are included as regular user messages
@@ -1291,11 +1296,16 @@ export class PromptHandler {
       const processedContent =
         await this.contentProcessor.processContent(content);
 
-      // Send to Cursor CLI with working directory and model
+      // Send to Cursor CLI with working directory, model, and cursor-agent chat ID
       const cursorResponse = await this.cursorBridge.sendPrompt({
         sessionId,
         content: processedContent,
-        metadata: { ...metadata, cwd: workingDir, model: currentModel },
+        metadata: {
+          ...metadata,
+          cwd: workingDir,
+          model: currentModel,
+          ...(cursorChatId && { cursorChatId }),
+        },
       });
 
       if (!cursorResponse.success) {
@@ -1413,18 +1423,20 @@ export class PromptHandler {
     this.activeSessionRequests.get(sessionId)!.add(abortController);
 
     try {
-      // Load session to get working directory and model
+      // Load session to get working directory, model, and cursor-agent chat ID
       const session = await this.sessionManager.loadSession(sessionId);
       const workingDir =
         (session.metadata['cwd'] as string | undefined) || process.cwd();
       const currentModel = this.sessionManager.getSessionModel(sessionId);
+      const cursorChatId = this.sessionManager.getCursorChatId(sessionId);
 
       this.logger.debug(
-        'Processing streaming prompt with working directory and model',
+        'Processing streaming prompt with working directory, model, and chat ID',
         {
           sessionId,
           cwd: workingDir,
           model: currentModel,
+          cursorChatId,
         }
       );
 
@@ -1453,12 +1465,17 @@ export class PromptHandler {
       // Initialize streaming state in content processor
       this.contentProcessor.startStreaming();
 
-      // Send streaming request to Cursor CLI with working directory and model
+      // Send streaming request to Cursor CLI with working directory, model, and cursor-agent chat ID
       const streamResponse = await this.cursorBridge.sendStreamingPrompt({
         sessionId,
         content: processedContent,
         ...(metadata !== undefined && {
-          metadata: { ...metadata, cwd: workingDir, model: currentModel },
+          metadata: {
+            ...metadata,
+            cwd: workingDir,
+            model: currentModel,
+            ...(cursorChatId && { cursorChatId }),
+          },
         }),
         abortSignal: abortController.signal,
         onChunk: async (chunk: StreamChunk) => {

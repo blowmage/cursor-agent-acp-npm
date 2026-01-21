@@ -17,6 +17,7 @@ import {
   type InternalSessionModeConfig,
   type SessionModel,
 } from '../types';
+import type { CursorCliBridge } from '../cursor/cli-bridge';
 import type {
   SessionMode,
   SessionModeId,
@@ -81,94 +82,13 @@ export class SessionManager {
       ],
     ]);
 
-  // Available models (synced with cursor-agent CLI)
-  // Models discovered from `cursor-agent --model unknown` error response.
-  // (There is not yet an official way to obtain the list of available models.)
-  private readonly availableModels: SessionModel[] = [
-    {
-      id: 'composer-1',
-      name: 'Composer 1',
-      provider: 'cursor',
-    },
+  // Available models (dynamically loaded from cursor-agent CLI)
+  // Starts with default "auto" model, then populated from `cursor-agent models` command
+  private availableModels: SessionModel[] = [
     {
       id: 'auto',
-      name: 'Auto (Cursor Default)',
+      name: 'Auto',
       provider: 'cursor',
-    },
-    {
-      id: 'sonnet-4.5',
-      name: 'Claude Sonnet 4.5',
-      provider: 'anthropic',
-    },
-    {
-      id: 'sonnet-4.5-thinking',
-      name: 'Claude Sonnet 4.5 (Thinking)',
-      provider: 'anthropic',
-    },
-    {
-      id: 'opus-4.5',
-      name: 'Claude Opus 4.5',
-      provider: 'anthropic',
-    },
-    {
-      id: 'opus-4.5-thinking',
-      name: 'Claude Opus 4.5 (Thinking)',
-      provider: 'anthropic',
-    },
-    {
-      id: 'gemini-3-pro',
-      name: 'Gemini 3 Pro',
-      provider: 'google',
-    },
-    {
-      id: 'gpt-5',
-      name: 'GPT-5',
-      provider: 'openai',
-    },
-    {
-      id: 'gpt-5.1',
-      name: 'GPT-5.1',
-      provider: 'openai',
-    },
-    {
-      id: 'gpt-5-high',
-      name: 'GPT-5 High',
-      provider: 'openai',
-    },
-    {
-      id: 'gpt-5.1-high',
-      name: 'GPT-5.1 High',
-      provider: 'openai',
-    },
-    {
-      id: 'gpt-5-codex',
-      name: 'GPT-5 Codex',
-      provider: 'openai',
-    },
-    {
-      id: 'gpt-5-codex-high',
-      name: 'GPT-5 Codex High',
-      provider: 'openai',
-    },
-    {
-      id: 'gpt-5.1-codex',
-      name: 'GPT-5.1 Codex',
-      provider: 'openai',
-    },
-    {
-      id: 'gpt-5.1-codex-high',
-      name: 'GPT-5.1 Codex High',
-      provider: 'openai',
-    },
-    {
-      id: 'opus-4.1',
-      name: 'Claude Opus 4.1',
-      provider: 'anthropic',
-    },
-    {
-      id: 'grok',
-      name: 'Grok',
-      provider: 'xai',
     },
   ];
 
@@ -495,6 +415,181 @@ export class SessionManager {
   }
 
   /**
+   * Sets available models (for testing purposes)
+   * This allows tests to populate the models list without calling cursor-agent
+   */
+  setAvailableModels(models: SessionModel[]): void {
+    this.availableModels = models;
+    this.logger.debug('Available models updated', {
+      count: models.length,
+      models: models.map((m) => m.id),
+    });
+  }
+
+  /**
+   * Loads available models from cursor-agent CLI
+   * Parses the output of `cursor-agent models` command
+   * Falls back to default "auto" model if loading fails
+   */
+  async loadModelsFromCursorAgent(
+    cursorBridge: CursorCliBridge
+  ): Promise<void> {
+    this.logger.debug('Loading models from cursor-agent CLI');
+
+    try {
+      const response = await cursorBridge.executeCommand(['models']);
+
+      if (!response.success) {
+        this.logger.warn(
+          'Failed to load models from cursor-agent, using default "auto" model',
+          { error: response.error }
+        );
+        return;
+      }
+
+      const models = this.parseModelsOutput(response.stdout || '');
+      if (models.length > 0) {
+        this.availableModels = models;
+        this.logger.info(`Loaded ${models.length} models from cursor-agent`, {
+          models: models.map((m) => m.id),
+        });
+      } else {
+        this.logger.warn(
+          'No models parsed from cursor-agent output, using default "auto" model'
+        );
+      }
+    } catch (error) {
+      this.logger.warn(
+        'Error loading models from cursor-agent, using default "auto" model',
+        { error }
+      );
+      // Keep default "auto" model
+    }
+  }
+
+  /**
+   * Parses the output of `cursor-agent models` command
+   * Expected format:
+   *   Available models
+   *
+   *   auto - Auto  (current)
+   *   composer-1 - Composer 1
+   *   gpt-5.2-codex - GPT-5.2 Codex
+   *   ...
+   */
+  private parseModelsOutput(output: string): SessionModel[] {
+    const models: SessionModel[] = [];
+    const lines = output.split('\n');
+
+    // Skip header line "Available models" and empty lines
+    let inModelsSection = false;
+    for (const line of lines) {
+      const trimmed = line.trim();
+
+      // Skip empty lines
+      if (!trimmed) {
+        continue;
+      }
+
+      // Detect start of models list
+      if (trimmed.toLowerCase().includes('available models')) {
+        inModelsSection = true;
+        continue;
+      }
+
+      // Skip tip lines
+      if (trimmed.toLowerCase().startsWith('tip:')) {
+        continue;
+      }
+
+      // Parse model lines: "model-id - Model Name  (current)" or "model-id - Model Name"
+      // Format: model ID and name are separated by " - "
+      // The text "(default)" and "(current)" should be ignored
+      if (inModelsSection) {
+        // Split on " - " to separate model ID from name
+        const dashIndex = trimmed.indexOf(' - ');
+        if (dashIndex === -1) {
+          continue; // Not a valid model line
+        }
+
+        // Extract model ID (everything before " - ") and trim whitespace
+        const id = trimmed.substring(0, dashIndex).trim();
+
+        // Extract model name (everything after " - ")
+        let name = trimmed.substring(dashIndex + 3);
+
+        // Remove optional "(current)" or "(default)" suffix (case-insensitive, with any whitespace)
+        name = name.replace(/\s*\((?:current|default)\)\s*$/i, '');
+
+        // Trim whitespace from model name
+        name = name.trim();
+
+        if (!id || !name) {
+          continue;
+        }
+
+        // Skip if already have "auto" (we start with it)
+        if (id === 'auto' && models.some((m) => m.id === 'auto')) {
+          continue;
+        }
+
+        // Infer provider from model ID
+        const provider = this.inferProvider(id);
+
+        models.push({
+          id,
+          name,
+          provider,
+        });
+      }
+    }
+
+    // Ensure "auto" is first if it exists
+    const autoIndex = models.findIndex((m) => m.id === 'auto');
+    if (autoIndex > 0) {
+      const autoModel = models.splice(autoIndex, 1)[0];
+      if (autoModel) {
+        models.unshift(autoModel);
+      }
+    } else if (autoIndex === -1) {
+      // Add auto if not found
+      models.unshift({
+        id: 'auto',
+        name: 'Auto',
+        provider: 'cursor',
+      });
+    }
+
+    return models;
+  }
+
+  /**
+   * Infers the provider from model ID
+   */
+  private inferProvider(modelId: string): string {
+    const id = modelId.toLowerCase();
+
+    if (id.includes('gpt') || id.includes('codex')) {
+      return 'openai';
+    }
+    if (id.includes('opus') || id.includes('sonnet') || id.includes('claude')) {
+      return 'anthropic';
+    }
+    if (id.includes('gemini')) {
+      return 'google';
+    }
+    if (id.includes('grok')) {
+      return 'xai';
+    }
+    if (id === 'auto' || id.includes('composer')) {
+      return 'cursor';
+    }
+
+    // Default to unknown if we can't infer
+    return 'unknown';
+  }
+
+  /**
    * Gets the current mode for a session
    * Per ACP spec: Returns the currentModeId
    */
@@ -509,6 +604,29 @@ export class SessionManager {
   getSessionModel(sessionId: string): string {
     const session = this.sessions.get(sessionId);
     return session?.state.currentModel || 'auto';
+  }
+
+  /**
+   * Gets the cursor-agent chat ID for a session
+   * Returns undefined if no chat ID is stored
+   */
+  getCursorChatId(sessionId: string): string | undefined {
+    const session = this.sessions.get(sessionId);
+    return session?.metadata['cursorChatId'] as string | undefined;
+  }
+
+  /**
+   * Sets the cursor-agent chat ID for a session
+   */
+  async setCursorChatId(sessionId: string, chatId: string): Promise<void> {
+    const session = await this.loadSession(sessionId);
+    session.metadata['cursorChatId'] = chatId;
+    session.updatedAt = new Date();
+    await this.persistSession(session);
+    this.logger.debug('Set cursor-agent chat ID for session', {
+      sessionId,
+      chatId,
+    });
   }
 
   /**
@@ -561,8 +679,12 @@ export class SessionManager {
     // Validate model exists
     const model = this.availableModels.find((m) => m.id === modelId);
     if (!model) {
+      const availableModelIds = this.availableModels
+        .map((m) => m.id)
+        .filter((id): id is string => id !== undefined)
+        .join(', ');
       throw new SessionError(
-        `Invalid model: ${modelId}. Available models: ${this.availableModels.map((m) => m.id).join(', ')}`,
+        `Invalid model: ${modelId}. Available models: ${availableModelIds}`,
         sessionId
       );
     }

@@ -125,17 +125,21 @@ export class CursorAgentImplementation implements Agent {
 
   /**
    * Set session model (UNSTABLE)
+   * Per ACP SDK: Method name is unstable_setSessionModel (with unstable_ prefix)
    */
-  async setSessionModel(
+  async unstable_setSessionModel(
     params: SetSessionModelRequest
   ): Promise<SetSessionModelResponse | void> {
-    this.logger.debug('Agent.setSessionModel called', { params });
+    this.logger.debug('Agent.unstable_setSessionModel called', { params });
 
     try {
       const result = await this.adapter.handleSetSessionModelFromAgent(params);
       return result;
     } catch (error) {
-      this.logger.error('Agent.setSessionModel failed', { error, params });
+      this.logger.error('Agent.unstable_setSessionModel failed', {
+        error,
+        params,
+      });
       throw error;
     }
   }
@@ -199,6 +203,8 @@ export class CursorAgentImplementation implements Agent {
    * Extension method handler
    * Per ACP spec: Extension methods start with underscore and follow JSON-RPC 2.0 semantics
    * Returns proper JSON-RPC error (-32601) if method not found
+   *
+   * Also handles unstable methods that the SDK might route here as fallback
    */
   async extMethod(
     method: string,
@@ -208,6 +214,27 @@ export class CursorAgentImplementation implements Agent {
 
     if (!this.adapter) {
       throw new Error('Adapter not available');
+    }
+
+    // Handle unstable session/set_model method if SDK routes it here
+    // This is a workaround for SDK versions that don't route unstable methods correctly
+    if (method === 'session/set_model') {
+      this.logger.debug(
+        'Routing session/set_model to unstable_setSessionModel'
+      );
+      try {
+        const result = await this.unstable_setSessionModel(
+          params as SetSessionModelRequest
+        );
+        // Convert response to Record<string, unknown> format expected by extMethod
+        return (result || {}) as Record<string, unknown>;
+      } catch (error) {
+        this.logger.error('Failed to handle session/set_model via extMethod', {
+          error,
+          params,
+        });
+        throw error;
+      }
     }
 
     try {

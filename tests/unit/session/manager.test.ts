@@ -694,6 +694,17 @@ describe('SessionManager', () => {
   });
 
   describe('getAvailableModels', () => {
+    beforeEach(() => {
+      // Set up available models for testing
+      manager.setAvailableModels([
+        { id: 'auto', name: 'Auto', provider: 'cursor' },
+        { id: 'composer-1', name: 'Composer 1', provider: 'cursor' },
+        { id: 'gpt-5', name: 'GPT-5', provider: 'openai' },
+        { id: 'sonnet-4.5', name: 'Claude 4.5 Sonnet', provider: 'anthropic' },
+        { id: 'grok', name: 'Grok', provider: 'xai' },
+      ]);
+    });
+
     it('should return list of available models', () => {
       // Act
       const models = manager.getAvailableModels();
@@ -756,6 +767,16 @@ describe('SessionManager', () => {
     let testSession: SessionData;
 
     beforeEach(async () => {
+      // Set up available models for testing
+      manager.setAvailableModels([
+        { id: 'auto', name: 'Auto', provider: 'cursor' },
+        { id: 'gpt-5', name: 'GPT-5', provider: 'openai' },
+        { id: 'gpt-5.2', name: 'GPT-5.2', provider: 'openai' },
+        { id: 'sonnet-4.5', name: 'Claude 4.5 Sonnet', provider: 'anthropic' },
+        { id: 'opus-4.5', name: 'Claude 4.5 Opus', provider: 'anthropic' },
+        { id: 'gemini-3-pro', name: 'Gemini 3 Pro', provider: 'google' },
+      ]);
+
       testSession = await manager.createSession({ name: 'Model Test' });
     });
 

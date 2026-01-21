@@ -81,6 +81,18 @@ describe('session/new - Parameter Validation', () => {
 
     adapter = new CursorAgentAdapter(testConfig, { logger: mockLogger });
     await adapter.initialize();
+
+    // Set up available models for testing
+    const sessionManager = adapter.getSessionManager();
+    if (sessionManager) {
+      sessionManager.setAvailableModels([
+        { id: 'auto', name: 'Auto', provider: 'cursor' },
+        { id: 'composer-1', name: 'Composer 1', provider: 'cursor' },
+        { id: 'gpt-5', name: 'GPT-5', provider: 'openai' },
+        { id: 'sonnet-4.5', name: 'Claude 4.5 Sonnet', provider: 'anthropic' },
+        { id: 'grok', name: 'Grok', provider: 'xai' },
+      ]);
+    }
   });
 
   afterEach(async () => {

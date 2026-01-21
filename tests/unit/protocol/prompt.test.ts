@@ -30,9 +30,12 @@ const mockSessionManager = {
   cleanup: jest.fn(),
   markSessionProcessing: jest.fn(),
   unmarkSessionProcessing: jest.fn(),
-  getSessionModel: jest.fn(),
+  getSessionModel: jest.fn().mockReturnValue('auto'),
+  getCursorChatId: jest.fn().mockReturnValue(undefined),
   setSessionModel: jest.fn(),
-  getAvailableModels: jest.fn(),
+  getAvailableModels: jest
+    .fn()
+    .mockReturnValue([{ id: 'auto', name: 'Auto', provider: 'cursor' }]),
 };
 
 const mockCursorBridge = {
@@ -82,6 +85,13 @@ describe('PromptHandler', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+
+    // Reset all mock return values
+    mockSessionManager.getSessionModel.mockReturnValue('auto');
+    mockSessionManager.getCursorChatId.mockReturnValue(undefined);
+    mockSessionManager.getAvailableModels.mockReturnValue([
+      { id: 'auto', name: 'Auto', provider: 'cursor' },
+    ]);
 
     mockSlashCommandsRegistry = new SlashCommandsRegistry(mockLogger);
     mockSlashCommandsRegistry.registerCommand(
@@ -157,6 +167,9 @@ describe('PromptHandler', () => {
           updatedAt: new Date(),
         });
 
+        mockSessionManager.getSessionModel.mockReturnValue('auto');
+        mockSessionManager.getCursorChatId.mockReturnValue(undefined);
+
         mockCursorBridge.sendPrompt.mockResolvedValue({
           success: true,
           stdout:
@@ -213,6 +226,9 @@ describe('PromptHandler', () => {
           createdAt: new Date(),
           updatedAt: new Date(),
         });
+
+        mockSessionManager.getSessionModel.mockReturnValue('auto');
+        mockSessionManager.getCursorChatId.mockReturnValue(undefined);
 
         const response = await promptHandler.processPrompt(legacyRequest);
 
@@ -285,6 +301,9 @@ describe('PromptHandler', () => {
           createdAt: new Date(),
           updatedAt: new Date(),
         });
+
+        mockSessionManager.getSessionModel.mockReturnValue('auto');
+        mockSessionManager.getCursorChatId.mockReturnValue(undefined);
 
         mockCursorBridge.sendStreamingPrompt.mockImplementation(
           async (options) => {
@@ -444,7 +463,12 @@ describe('PromptHandler', () => {
           },
         };
 
-        mockSessionManager.loadSession.mockResolvedValue({});
+        mockSessionManager.loadSession.mockResolvedValue({
+          id: 'test-session-1',
+          metadata: { cwd: '/tmp' },
+        });
+        mockSessionManager.getSessionModel.mockReturnValue('auto');
+        mockSessionManager.getCursorChatId.mockReturnValue(undefined);
         mockCursorBridge.sendPrompt.mockResolvedValue({
           success: true,
           stdout: 'Response',
@@ -472,7 +496,12 @@ describe('PromptHandler', () => {
           },
         };
 
-        mockSessionManager.loadSession.mockResolvedValue({});
+        mockSessionManager.loadSession.mockResolvedValue({
+          id: 'test-session-1',
+          metadata: { cwd: '/tmp' },
+        });
+        mockSessionManager.getSessionModel.mockReturnValue('auto');
+        mockSessionManager.getCursorChatId.mockReturnValue(undefined);
         mockCursorBridge.sendPrompt.mockResolvedValue({
           success: true,
           stdout: 'Response',
@@ -498,7 +527,12 @@ describe('PromptHandler', () => {
           },
         };
 
-        mockSessionManager.loadSession.mockResolvedValue({});
+        mockSessionManager.loadSession.mockResolvedValue({
+          id: 'test-session-1',
+          metadata: { cwd: '/tmp' },
+        });
+        mockSessionManager.getSessionModel.mockReturnValue('auto');
+        mockSessionManager.getCursorChatId.mockReturnValue(undefined);
         mockCursorBridge.sendPrompt.mockResolvedValue({
           success: true,
           stdout: 'Response',
@@ -539,6 +573,7 @@ describe('PromptHandler', () => {
           },
         });
         mockSessionManager.getSessionModel.mockReturnValue('default');
+        mockSessionManager.getCursorChatId.mockReturnValue(undefined);
         mockCursorBridge.sendPrompt.mockResolvedValue({
           success: false,
           error: 'Cursor CLI is not available',
@@ -601,6 +636,7 @@ describe('PromptHandler', () => {
           },
         });
         mockSessionManager.getSessionModel.mockReturnValue('default');
+        mockSessionManager.getCursorChatId.mockReturnValue(undefined);
         mockCursorBridge.sendPrompt.mockResolvedValue({
           success: false,
           error: 'cursor-agent CLI not installed or not in PATH',
@@ -647,6 +683,7 @@ describe('PromptHandler', () => {
           },
         });
         mockSessionManager.getSessionModel.mockReturnValue('default');
+        mockSessionManager.getCursorChatId.mockReturnValue(undefined);
         mockCursorBridge.sendPrompt.mockResolvedValue({
           success: false,
           error: 'User not authenticated. Please run: cursor-agent login',
@@ -691,6 +728,7 @@ describe('PromptHandler', () => {
           },
         });
         mockSessionManager.getSessionModel.mockReturnValue('default');
+        mockSessionManager.getCursorChatId.mockReturnValue(undefined);
 
         // Test "not installed" error
         mockCursorBridge.sendPrompt.mockResolvedValue({
@@ -751,7 +789,12 @@ describe('PromptHandler', () => {
         },
       };
 
-      mockSessionManager.loadSession.mockResolvedValue({});
+      mockSessionManager.loadSession.mockResolvedValue({
+        id: 'test-session-1',
+        metadata: { cwd: '/tmp' },
+      });
+      mockSessionManager.getSessionModel.mockReturnValue('auto');
+      mockSessionManager.getCursorChatId.mockReturnValue(undefined);
       mockCursorBridge.sendStreamingPrompt.mockImplementation(async () => {
         // Simulate long-running stream
         await new Promise((resolve) => setTimeout(resolve, 100));
@@ -797,6 +840,8 @@ describe('PromptHandler', () => {
         createdAt: new Date(),
         updatedAt: new Date(),
       });
+      mockSessionManager.getSessionModel.mockReturnValue('auto');
+      mockSessionManager.getCursorChatId.mockReturnValue(undefined);
       mockCursorBridge.sendPrompt.mockResolvedValue({
         success: true,
         stdout: 'Response 1',
@@ -869,6 +914,8 @@ describe('PromptHandler', () => {
         createdAt: new Date(),
         updatedAt: new Date(),
       });
+      mockSessionManager.getSessionModel.mockReturnValue('auto');
+      mockSessionManager.getCursorChatId.mockReturnValue(undefined);
       mockCursorBridge.sendPrompt.mockResolvedValue({
         success: true,
         stdout: 'Great code!',
@@ -1393,6 +1440,7 @@ describe('PromptHandler', () => {
       });
 
       mockSessionManager.getSessionModel.mockReturnValue('auto');
+      mockSessionManager.getCursorChatId.mockReturnValue(undefined);
 
       mockCursorBridge.sendPrompt.mockResolvedValue({
         success: true,

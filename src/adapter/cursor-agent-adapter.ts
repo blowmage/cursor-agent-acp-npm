@@ -454,6 +454,13 @@ export class CursorAgentAdapter implements ClientConnection {
   }
 
   /**
+   * Get the session manager (for testing purposes)
+   */
+  getSessionManager(): SessionManager | undefined {
+    return this.sessionManager;
+  }
+
+  /**
    * Get adapter status and metrics
    */
   getStatus(): {
@@ -497,11 +504,24 @@ export class CursorAgentAdapter implements ClientConnection {
   // Private methods
 
   private async initializeComponents(): Promise<void> {
+    // Initialize CursorCliBridge first (needed for loading models)
+    this.cursorBridge = new CursorCliBridge(this.config, this.logger);
+
     // Initialize SessionManager
     this.sessionManager = new SessionManager(this.config, this.logger);
 
-    // Initialize CursorCliBridge
-    this.cursorBridge = new CursorCliBridge(this.config, this.logger);
+    // Load available models from cursor-agent CLI
+    if (this.cursorBridge && this.sessionManager) {
+      try {
+        await this.sessionManager.loadModelsFromCursorAgent(this.cursorBridge);
+      } catch (error) {
+        this.logger.warn(
+          'Failed to load models from cursor-agent during initialization',
+          { error }
+        );
+        // Continue with default "auto" model
+      }
+    }
 
     // Initialize SlashCommandsRegistry
     this.slashCommandsRegistry = new SlashCommandsRegistry(this.logger);
@@ -880,7 +900,31 @@ export class CursorAgentAdapter implements ClientConnection {
     // Validate metadata before creating session
     this.validateSessionMetadata(metadata);
 
-    const sessionData = await this.sessionManager.createSession(metadata);
+    // Create cursor-agent chat for this session
+    let cursorChatId: string | undefined;
+    if (this.cursorBridge) {
+      try {
+        cursorChatId = await this.cursorBridge.createChat();
+        this.logger.debug('Created cursor-agent chat for session', {
+          chatId: cursorChatId,
+        });
+      } catch (error) {
+        this.logger.warn(
+          'Failed to create cursor-agent chat, session will work without chat continuity',
+          { error }
+        );
+        // Continue without chat ID - prompts will work but won't resume chat
+      }
+    }
+
+    // Store cursor-agent chat ID in metadata
+    const sessionMetadata = {
+      ...metadata,
+      ...(cursorChatId && { cursorChatId }),
+    };
+
+    const sessionData =
+      await this.sessionManager.createSession(sessionMetadata);
 
     this.logger.info('Session created with working directory and MCP servers', {
       sessionId: sessionData.id,
