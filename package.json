@@ -92,12 +92,6 @@
     "typescript": "^5.9.3"
   },
   "peerDependencies": {
-    "cursor-agent": ">=1.0.0",
     "zod": "^3.25.0 || ^4.0.0"
-  },
-  "peerDependenciesMeta": {
-    "cursor-agent": {
-      "optional": false
-    }
   }
 }
