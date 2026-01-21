@@ -586,6 +586,7 @@ export class CursorAgentAdapter implements ClientConnection {
       logger: this.logger,
       sendNotification: this.sendNotification.bind(this),
       slashCommandsRegistry: this.slashCommandsRegistry,
+      toolCallManager: this.toolCallManager,
     });
 
     // Initialize ACP-compliant file system client

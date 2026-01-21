@@ -599,6 +599,7 @@ export class CursorCliBridge {
         // Parse JSON response if available
         let parsedResponse;
         let actualResponseText = response.stdout || '';
+        let toolCalls: any[] | undefined;
 
         try {
           parsedResponse = response.stdout ? JSON.parse(response.stdout) : null;
@@ -615,6 +616,54 @@ export class CursorCliBridge {
             } else if (parsedResponse.message) {
               actualResponseText = parsedResponse.message;
             }
+
+            // Extract tool call information from various possible fields
+            // Cursor CLI may include tool calls in different formats
+            if (
+              parsedResponse.toolCalls &&
+              Array.isArray(parsedResponse.toolCalls)
+            ) {
+              toolCalls = parsedResponse.toolCalls;
+              this.logger.debug('Found toolCalls in Cursor CLI response', {
+                count: toolCalls?.length || 0,
+              });
+            } else if (
+              parsedResponse.tool_calls &&
+              Array.isArray(parsedResponse.tool_calls)
+            ) {
+              toolCalls = parsedResponse.tool_calls;
+              this.logger.debug('Found tool_calls in Cursor CLI response', {
+                count: toolCalls?.length || 0,
+              });
+            } else if (
+              parsedResponse.tools &&
+              Array.isArray(parsedResponse.tools)
+            ) {
+              toolCalls = parsedResponse.tools;
+              this.logger.debug('Found tools in Cursor CLI response', {
+                count: toolCalls?.length || 0,
+              });
+            } else if (
+              parsedResponse.toolCall &&
+              typeof parsedResponse.toolCall === 'object'
+            ) {
+              toolCalls = [parsedResponse.toolCall];
+              this.logger.debug('Found toolCall in Cursor CLI response');
+            } else if (
+              parsedResponse.tool_call &&
+              typeof parsedResponse.tool_call === 'object'
+            ) {
+              toolCalls = [parsedResponse.tool_call];
+              this.logger.debug('Found tool_call in Cursor CLI response');
+            } else {
+              // Log available keys for debugging
+              this.logger.debug('No tool calls found in Cursor CLI response', {
+                availableKeys: Object.keys(parsedResponse),
+                hasResult: Boolean(parsedResponse.result),
+                hasResponse: Boolean(parsedResponse.response),
+                hasContent: Boolean(parsedResponse.content),
+              });
+            }
           }
         } catch {
           // If JSON parsing fails, treat as plain text
@@ -629,6 +678,8 @@ export class CursorCliBridge {
             ...metadata,
             processedAt: new Date().toISOString(),
             contentLength: content.value.length,
+            ...(toolCalls !== undefined && { toolCalls }),
+            ...(parsedResponse && { parsedResponse }),
           },
         };
       } finally {

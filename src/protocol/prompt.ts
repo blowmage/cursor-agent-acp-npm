@@ -16,6 +16,7 @@ import type {
 } from '@agentclientprotocol/sdk';
 import type { AnyRequest } from '@agentclientprotocol/sdk/dist/jsonrpc.js';
 import type { SlashCommandsRegistry } from '../tools/slash-commands';
+import type { ToolCallManager } from '../tools/tool-call-manager';
 import {
   ProtocolError,
   SessionError,
@@ -51,6 +52,7 @@ export interface PromptHandlerOptions {
     params?: any;
   }) => void;
   slashCommandsRegistry?: SlashCommandsRegistry;
+  toolCallManager?: ToolCallManager;
 }
 
 export interface StreamOptions {
@@ -134,6 +136,7 @@ export class PromptHandler {
     params?: any;
   }) => void;
   private readonly slashCommandsRegistry: SlashCommandsRegistry | undefined;
+  private readonly toolCallManager: ToolCallManager | undefined;
   // Processing configuration
   private readonly processingConfig: PromptProcessingConfig = {
     echoUserMessages: true,
@@ -150,6 +153,7 @@ export class PromptHandler {
     this.logger = options.logger;
     this.sendNotification = options.sendNotification;
     this.slashCommandsRegistry = options.slashCommandsRegistry;
+    this.toolCallManager = options.toolCallManager;
     this.contentProcessor = new ContentProcessor({
       config: this.config,
       logger: this.logger,
@@ -1304,6 +1308,75 @@ export class PromptHandler {
         );
       }
 
+      // Extract and report tool calls from Cursor CLI response if available
+      // Per ACP spec: Report tool calls that were made during prompt processing
+      const toolCalls = cursorResponse.metadata?.['toolCalls'];
+      if (toolCalls && Array.isArray(toolCalls) && this.toolCallManager) {
+        for (const toolCallData of toolCalls) {
+          try {
+            // Extract tool call information from various possible formats
+            const toolName =
+              toolCallData.name ||
+              toolCallData.tool ||
+              toolCallData.toolName ||
+              'unknown_tool';
+            const toolTitle =
+              toolCallData.title ||
+              toolCallData.description ||
+              `Executing ${toolName}`;
+            const toolParams =
+              toolCallData.parameters ||
+              toolCallData.params ||
+              toolCallData.args ||
+              {};
+            const toolStatus = toolCallData.status || 'completed';
+            const toolResult =
+              toolCallData.result ||
+              toolCallData.output ||
+              toolCallData.response;
+
+            // Report the tool call
+            const toolCallId = await this.toolCallManager.reportToolCall(
+              sessionId,
+              toolName,
+              {
+                title: toolTitle,
+                kind: toolCallData.kind || 'read',
+                status:
+                  toolStatus === 'completed'
+                    ? 'completed'
+                    : toolStatus === 'failed'
+                      ? 'failed'
+                      : 'pending',
+                rawInput: toolParams,
+                ...(toolResult && { rawOutput: toolResult }),
+              }
+            );
+
+            // If the tool call is already completed, update it immediately
+            if (toolStatus === 'completed' || toolStatus === 'failed') {
+              await this.toolCallManager.updateToolCall(sessionId, toolCallId, {
+                status: toolStatus === 'completed' ? 'completed' : 'failed',
+                ...(toolResult && { rawOutput: toolResult }),
+                ...(toolStatus === 'failed' &&
+                  toolCallData.error && {
+                    error: toolCallData.error,
+                  }),
+              });
+            }
+          } catch (error) {
+            // Log but don't fail the entire prompt if tool call reporting fails
+            this.logger.warn(
+              'Failed to report tool call from Cursor CLI response',
+              {
+                error: error instanceof Error ? error.message : String(error),
+                toolCallData,
+              }
+            );
+          }
+        }
+      }
+
       // Process Cursor's response content
       const responseContent = await this.contentProcessor.parseResponse(
         cursorResponse.stdout || ''
@@ -1550,6 +1623,75 @@ export class PromptHandler {
         throw new ProtocolError(
           `Streaming error: ${streamResponse.error || 'Unknown error'}`
         );
+      }
+
+      // Extract and report tool calls from Cursor CLI streaming response if available
+      // Per ACP spec: Report tool calls that were made during prompt processing
+      const toolCalls = streamResponse.metadata?.['toolCalls'];
+      if (toolCalls && Array.isArray(toolCalls) && this.toolCallManager) {
+        for (const toolCallData of toolCalls) {
+          try {
+            // Extract tool call information from various possible formats
+            const toolName =
+              toolCallData.name ||
+              toolCallData.tool ||
+              toolCallData.toolName ||
+              'unknown_tool';
+            const toolTitle =
+              toolCallData.title ||
+              toolCallData.description ||
+              `Executing ${toolName}`;
+            const toolParams =
+              toolCallData.parameters ||
+              toolCallData.params ||
+              toolCallData.args ||
+              {};
+            const toolStatus = toolCallData.status || 'completed';
+            const toolResult =
+              toolCallData.result ||
+              toolCallData.output ||
+              toolCallData.response;
+
+            // Report the tool call
+            const toolCallId = await this.toolCallManager.reportToolCall(
+              sessionId,
+              toolName,
+              {
+                title: toolTitle,
+                kind: toolCallData.kind || 'read',
+                status:
+                  toolStatus === 'completed'
+                    ? 'completed'
+                    : toolStatus === 'failed'
+                      ? 'failed'
+                      : 'pending',
+                rawInput: toolParams,
+                ...(toolResult && { rawOutput: toolResult }),
+              }
+            );
+
+            // If the tool call is already completed, update it immediately
+            if (toolStatus === 'completed' || toolStatus === 'failed') {
+              await this.toolCallManager.updateToolCall(sessionId, toolCallId, {
+                status: toolStatus === 'completed' ? 'completed' : 'failed',
+                ...(toolResult && { rawOutput: toolResult }),
+                ...(toolStatus === 'failed' &&
+                  toolCallData.error && {
+                    error: toolCallData.error,
+                  }),
+              });
+            }
+          } catch (error) {
+            // Log but don't fail the entire prompt if tool call reporting fails
+            this.logger.warn(
+              'Failed to report tool call from Cursor CLI streaming response',
+              {
+                error: error instanceof Error ? error.message : String(error),
+                toolCallData,
+              }
+            );
+          }
+        }
       }
 
       // Add final assistant message to session
