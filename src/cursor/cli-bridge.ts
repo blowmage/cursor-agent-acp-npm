@@ -575,7 +575,7 @@ export class CursorCliBridge {
           '--print',
           '--output-format',
           'json',
-          '--force', // Allow commands unless explicitly denied
+          ...(this.config.cursor.force ? ['--force'] : []),
           content.value,
         ];
 

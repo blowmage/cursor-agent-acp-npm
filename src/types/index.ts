@@ -303,6 +303,7 @@ export interface AdapterConfig {
   cursor: {
     timeout: number;
     retries: number;
+    force?: boolean;
   };
 }
 
