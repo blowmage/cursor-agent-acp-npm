@@ -30,6 +30,7 @@ interface CliOptions {
   noFilesystem?: boolean;
   noTerminal?: boolean;
   maxProcesses: string;
+  force?: boolean;
   verbose?: boolean;
   quiet?: boolean;
   validate?: boolean;
@@ -111,6 +112,7 @@ program
     'maximum number of terminal processes',
     '5'
   )
+  .option('--force', 'pass --force to cursor-agent (allow all commands without prompting)')
   .option('-v, --verbose', 'enable verbose logging')
   .option('-q, --quiet', 'suppress all output except errors')
   .option('--validate', 'validate configuration and exit')
@@ -333,6 +335,9 @@ async function main(): Promise<void> {
     }
     if (options.noTerminal) {
       config.tools.terminal.enabled = false;
+    }
+    if (options.force) {
+      config.cursor.force = true;
     }
 
     // Validate configuration
