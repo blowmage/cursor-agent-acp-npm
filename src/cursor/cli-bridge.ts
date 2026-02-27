@@ -46,6 +46,7 @@ export class CursorCliBridge {
     this.logger = logger;
 
     this.logger.debug('CursorCliBridge initialized', {
+      command: config.cursor.command,
       timeout: config.cursor.timeout,
       retries: config.cursor.retries,
     });
@@ -180,7 +181,7 @@ export class CursorCliBridge {
     command: string[],
     options: CursorCommandOptions = {}
   ): Promise<CursorResponse> {
-    const commandStr = `cursor-agent ${command.join(' ')}`;
+    const commandStr = `${this.config.cursor.command.join(' ')} ${command.join(' ')}`;
     this.logger.debug(`Executing command: ${commandStr}`, options);
 
     const startTime = Date.now();
@@ -428,9 +429,11 @@ export class CursorCliBridge {
     });
 
     return new Promise((resolve, reject) => {
-      this.logger.info(`About to spawn: cursor-agent ${command.join(' ')}`);
+      const [bin, ...prefixArgs] = this.config.cursor.command;
+      const fullArgs = [...prefixArgs, ...command];
+      this.logger.info(`About to spawn: ${bin} ${fullArgs.join(' ')}`);
 
-      const childProcess = spawn('cursor-agent', command, {
+      const childProcess = spawn(bin!, fullArgs, {
         cwd: workingDir,
         env: { ...process.env, ...options.env },
         // Don't use spawn's timeout option - it causes issues with cursor-agent
@@ -837,7 +840,9 @@ export class CursorCliBridge {
     const { abortSignal, onData, cwd } = options;
 
     return new Promise((resolve, reject) => {
-      const childProcess = spawn('cursor-agent', command, {
+      const [bin, ...prefixArgs] = this.config.cursor.command;
+      const fullArgs = [...prefixArgs, ...command];
+      const childProcess = spawn(bin!, fullArgs, {
         // Use 'ignore' for stdin since cursor-agent gets input from args
         stdio: ['ignore', 'pipe', 'pipe'],
         env: { ...process.env },

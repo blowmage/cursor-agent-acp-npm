@@ -89,6 +89,7 @@ export const DEFAULT_CONFIG: AdapterConfig = {
     },
   },
   cursor: {
+    command: ['cursor-agent'],
     timeout: 30000,
     retries: 3,
   },

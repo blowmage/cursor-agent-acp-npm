@@ -182,6 +182,39 @@ cursor-agent-acp --log-level debug
 
 # Specify session storage directory
 cursor-agent-acp --session-dir ~/.cursor-sessions
+
+# Custom cursor agent command (useful for WSL or non-standard installations)
+cursor-agent-acp --cursor-command "wsl /usr/local/bin/agent"
+```
+
+### Custom Cursor Agent Command
+
+By default, the adapter invokes `cursor-agent` to communicate with the Cursor CLI. If your
+Cursor CLI binary has a different name or needs to be invoked through a wrapper (e.g. WSL),
+use the `--cursor-command` option:
+
+```bash
+# Invoke via WSL with an absolute path
+cursor-agent-acp --cursor-command "wsl /home/user/.local/bin/agent"
+
+# Use a custom binary name
+cursor-agent-acp --cursor-command "my-cursor-agent"
+```
+
+The value is split by whitespace. The first token is the binary to spawn, and the remaining
+tokens are prepended to every invocation. For example, `"wsl /usr/local/bin/agent"` runs
+`wsl /usr/local/bin/agent status`, `wsl /usr/local/bin/agent models`, etc.
+
+This can also be set in a configuration file under `cursor.command` as a string array:
+
+```json
+{
+  "cursor": {
+    "command": ["wsl", "/home/user/.local/bin/agent"],
+    "timeout": 30000,
+    "retries": 3
+  }
+}
 ```
 
 ### Configuration File Example
@@ -216,6 +249,7 @@ cursor-agent-acp --session-dir ~/.cursor-sessions
     }
   },
   "cursor": {
+    "command": ["cursor-agent"],
     "timeout": 30000,
     "retries": 3
   }
