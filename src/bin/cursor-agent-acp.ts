@@ -30,6 +30,7 @@ interface CliOptions {
   noFilesystem?: boolean;
   noTerminal?: boolean;
   maxProcesses: string;
+  cursorCommand: string;
   verbose?: boolean;
   quiet?: boolean;
   validate?: boolean;
@@ -111,6 +112,11 @@ program
     'maximum number of terminal processes',
     '5'
   )
+  .option(
+    '--cursor-command <command>',
+    'command to invoke cursor agent, space-separated (e.g. "wsl agent")',
+    'cursor-agent'
+  )
   .option('-v, --verbose', 'enable verbose logging')
   .option('-q, --quiet', 'suppress all output except errors')
   .option('--validate', 'validate configuration and exit')
@@ -128,17 +134,23 @@ const isSubcommand = process.argv.some((arg) => ['auth', 'help'].includes(arg));
 
 const options = program.opts() as CliOptions;
 
+// Parse the cursor command string into [binary, ...prefixArgs]
+function parseCursorCommand(cmd: string): string[] {
+  return cmd.split(/\s+/).filter(Boolean);
+}
+
 /**
  * Handle auth login command
  */
-async function handleAuthLogin(options: { check?: boolean }): Promise<void> {
+async function handleAuthLogin(loginOpts: { check?: boolean }): Promise<void> {
   const logger = createLogger({ level: 'info' });
 
   logger.info('Starting Cursor CLI login...');
   logger.info('This will open your browser for authentication.');
 
   return new Promise<void>((resolve, reject) => {
-    const childProcess = spawn('cursor-agent', ['login'], {
+    const [bin, ...prefixArgs] = parseCursorCommand(options.cursorCommand);
+    const childProcess = spawn(bin!, [...prefixArgs, 'login'], {
       stdio: 'inherit', // Inherit stdin/stdout/stderr for interactive login
       env: { ...process.env },
     });
@@ -148,9 +160,12 @@ async function handleAuthLogin(options: { check?: boolean }): Promise<void> {
         logger.info('Login completed successfully!');
 
         // Check authentication status if requested
-        if (options.check) {
+        if (loginOpts.check) {
           try {
-            const config: AdapterConfig = { ...DEFAULT_CONFIG };
+            const config: AdapterConfig = {
+              ...DEFAULT_CONFIG,
+              cursor: { ...DEFAULT_CONFIG.cursor, command: parseCursorCommand(options.cursorCommand) },
+            };
             const bridge = new CursorCliBridge(config, logger);
             const authStatus = await bridge.checkAuthentication();
 
@@ -206,7 +221,8 @@ async function handleAuthLogout(): Promise<void> {
   logger.info('Logging out from Cursor CLI...');
 
   return new Promise<void>((resolve, reject) => {
-    const childProcess = spawn('cursor-agent', ['logout'], {
+    const [bin, ...prefixArgs] = parseCursorCommand(options.cursorCommand);
+    const childProcess = spawn(bin!, [...prefixArgs, 'logout'], {
       stdio: 'inherit', // Inherit stdin/stdout/stderr for interactive logout
       env: { ...process.env },
     });
@@ -240,7 +256,10 @@ async function handleAuthStatus(): Promise<void> {
   logger.info('Checking authentication status...');
 
   try {
-    const config: AdapterConfig = { ...DEFAULT_CONFIG };
+    const config: AdapterConfig = {
+      ...DEFAULT_CONFIG,
+      cursor: { ...DEFAULT_CONFIG.cursor, command: parseCursorCommand(options.cursorCommand) },
+    };
     const bridge = new CursorCliBridge(config, logger);
     const authStatus = await bridge.checkAuthentication();
 
@@ -327,6 +346,9 @@ async function main(): Promise<void> {
     }
     if (options.maxProcesses) {
       config.tools.terminal.maxProcesses = parseInt(options.maxProcesses, 10);
+    }
+    if (options.cursorCommand) {
+      config.cursor.command = parseCursorCommand(options.cursorCommand);
     }
     if (options.noFilesystem) {
       config.tools.filesystem.enabled = false;

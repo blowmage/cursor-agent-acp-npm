@@ -301,6 +301,9 @@ export interface AdapterConfig {
     };
   };
   cursor: {
+    // The command to invoke cursor agent. First element is the binary, rest are prefix args.
+    // e.g. ["cursor-agent"] (default) or ["wsl", "agent"] (WSL setup).
+    command: string[];
     timeout: number;
     retries: number;
   };
