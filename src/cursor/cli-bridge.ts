@@ -6,6 +6,8 @@
  */
 
 import { spawn, ChildProcess } from 'child_process';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import {
   CursorError,
   type AdapterConfig,
@@ -564,8 +566,8 @@ export class CursorCliBridge {
         cwd: workingDir,
       });
 
-      // Create a temporary file for the prompt content
-      const tempFile = `/tmp/cursor-prompt-${Date.now()}.txt`;
+      // Create a temporary file for the prompt content (use OS temp dir for cross-platform support)
+      const tempFile = join(tmpdir(), `cursor-prompt-${Date.now()}.txt`);
       const fs = await import('fs/promises');
       await fs.writeFile(tempFile, content.value, 'utf8');
 
