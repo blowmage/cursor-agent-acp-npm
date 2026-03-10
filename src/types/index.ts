@@ -304,6 +304,7 @@ export interface AdapterConfig {
     timeout: number;
     retries: number;
     force?: boolean;
+    trust?: boolean;
   };
 }
 

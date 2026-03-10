@@ -30,6 +30,7 @@ interface CliOptions {
   noFilesystem?: boolean;
   noTerminal?: boolean;
   maxProcesses: string;
+  trust?: boolean;
   force?: boolean;
   verbose?: boolean;
   quiet?: boolean;
@@ -113,6 +114,7 @@ program
     '5'
   )
   .option('--force', 'pass --force to cursor-agent (allow all commands without prompting)')
+  .option('--trust', 'pass --trust to cursor-agent')
   .option('-v, --verbose', 'enable verbose logging')
   .option('-q, --quiet', 'suppress all output except errors')
   .option('--validate', 'validate configuration and exit')
@@ -338,6 +340,9 @@ async function main(): Promise<void> {
     }
     if (options.force) {
       config.cursor.force = true;
+    }
+    if (options.trust) {
+      config.cursor.trust = true;
     }
 
     // Validate configuration
