@@ -575,7 +575,8 @@ export class CursorCliBridge {
           '--print',
           '--output-format',
           'json',
-          '--force', // Allow commands unless explicitly denied
+          ...(this.config.cursor.trust ? ['--trust'] : []),
+          ...(this.config.cursor.force ? ['--force'] : []),
           content.value,
         ];
 
@@ -711,10 +712,11 @@ export class CursorCliBridge {
       const args = [
         'agent',
         '--print',
+        ...(this.config.cursor.force ? ['--force'] : []),
+        ...(this.config.cursor.trust ? ['--trust'] : []),
         '--output-format',
         'stream-json',
         '--stream-partial-output',
-        '--force',
         content.value,
       ];
 
