@@ -69,7 +69,7 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.13.0",
     "commander": "^14.0.2",
-    "uuid": "^13.0.0",
+    "uuid": "^14.0.0",
     "winston": "^3.19.0"
   },
   "devDependencies": {
